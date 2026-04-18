@@ -1591,7 +1591,7 @@ create_systemd_services() {
     log_info "Создание systemd служб..."
     
     # gochs-api.service
-    cat > /etc/systemd/system/gochs-api.service << EOF
+cat > /etc/systemd/system/gochs-api.service << EOF
 [Unit]
 Description=ГО-ЧС API Service
 After=network.target postgresql.service redis-server.service asterisk.service
@@ -1601,38 +1601,14 @@ Wants=postgresql.service redis-server.service asterisk.service
 Type=simple
 User=$GOCHS_USER
 Group=$GOCHS_GROUP
-WorkingDirectory=$INSTALL_DIR/app
+WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
-ExecStart=$INSTALL_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+ExecStart=$INSTALL_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10
 StandardOutput=append:$INSTALL_DIR/logs/api.log
 StandardError=append:$INSTALL_DIR/logs/api_error.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    # gochs-worker.service
-    cat > /etc/systemd/system/gochs-worker.service << EOF
-[Unit]
-Description=ГО-ЧС Celery Worker
-After=network.target redis-server.service
-Wants=redis-server.service
-
-[Service]
-Type=simple
-User=$GOCHS_USER
-Group=$GOCHS_GROUP
-WorkingDirectory=$INSTALL_DIR/app
-Environment="PATH=$INSTALL_DIR/venv/bin"
-Environment="PYTHONPATH=$INSTALL_DIR"
-ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4 -Q default,high_priority,stt
-Restart=always
-RestartSec=10
-StandardOutput=append:$INSTALL_DIR/logs/worker.log
-StandardError=append:$INSTALL_DIR/logs/worker_error.log
 
 [Install]
 WantedBy=multi-user.target
@@ -1649,7 +1625,7 @@ Wants=redis-server.service
 Type=simple
 User=$GOCHS_USER
 Group=$GOCHS_GROUP
-WorkingDirectory=$INSTALL_DIR/app
+WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
 ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app beat --loglevel=info
@@ -1672,7 +1648,7 @@ After=network.target redis-server.service
 Type=simple
 User=$GOCHS_USER
 Group=$GOCHS_GROUP
-WorkingDirectory=$INSTALL_DIR/app
+WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
 ExecStart=$INSTALL_DIR/venv/bin/python -m app.services.websocket.server
@@ -1755,7 +1731,7 @@ EOF
 post_install_fixes() {
     log_info "Применение финальных настроек..."
     
-    # Обновление пароля Redis в main.py
+    # Пароль Redis в API
     local redis_pass=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
     if [[ -n "$redis_pass" ]] && [[ -f "$INSTALL_DIR/app/main.py" ]]; then
         sed -i "s/REDIS_PASSWORD = .*/REDIS_PASSWORD = \"$redis_pass\"/" "$INSTALL_DIR/app/main.py"
@@ -1766,6 +1742,9 @@ post_install_fixes() {
         chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/app"
         chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/logs"
     fi
+    
+    # Исправление прав на директории
+    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR" 2>/dev/null || true
     
     log_info "Финальные настройки применены"
 }
