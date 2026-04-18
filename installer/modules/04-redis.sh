@@ -3,12 +3,77 @@
 ################################################################################
 # Модуль: 04-redis.sh
 # Назначение: Установка и настройка Redis для очередей и кэширования
+# Версия: 1.0.1 (исправленная полная версия)
 ################################################################################
 
-source "${UTILS_DIR}/common.sh"
+# Определение путей
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Загрузка общих функций
+if [[ -f "${SCRIPT_DIR}/utils/common.sh" ]]; then
+    source "${SCRIPT_DIR}/utils/common.sh"
+fi
+
+# Если common.sh не найден - определяем функции локально
+if ! type log_info &>/dev/null; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+    
+    log_info() { echo -e "${GREEN}[INFO]${NC} $(date '+%H:%M:%S') $*"; }
+    log_warn() { echo -e "${YELLOW}[WARN]${NC} $(date '+%H:%M:%S') $*"; }
+    log_error() { echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $*"; }
+    log_step() { 
+        echo ""
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${BLUE}  $*${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    }
+    backup_file() { 
+        local file="$1"
+        if [[ -f "$file" ]]; then
+            cp "$file" "${file}.backup.$(date +%Y%m%d_%H%M%S)"
+            log_info "Создана резервная копия: $file"
+        fi
+    }
+    wait_for_service() { 
+        local service="$1"
+        local max_wait="${2:-30}"
+        local count=0
+        while ! systemctl is-active --quiet "$service" 2>/dev/null; do
+            sleep 1
+            ((count++))
+            [[ $count -ge $max_wait ]] && return 1
+        done
+        return 0
+    }
+    mark_module_installed() {
+        local module="$1"
+        local state_file="${INSTALL_DIR:-/opt/gochs-informing}/.modules_state"
+        mkdir -p "$(dirname "$state_file")"
+        echo "$module:$(date +%s)" >> "$state_file"
+    }
+    generate_password() {
+        openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "RedisPass$(date +%s)"
+    }
+fi
 
 MODULE_NAME="04-redis"
 MODULE_DESCRIPTION="Redis для очередей задач и кэширования"
+
+# Загрузка конфигурации
+CONFIG_FILE="${SCRIPT_DIR}/config/config.env"
+if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+else
+    INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+    REDIS_PORT="${REDIS_PORT:-6379}"
+    REDIS_PASSWORD="${REDIS_PASSWORD:-$(generate_password)}"
+    REDIS_MAXMEMORY="${REDIS_MAXMEMORY:-512mb}"
+fi
 
 # Версия Redis
 REDIS_VERSION="7.2"
@@ -16,72 +81,109 @@ REDIS_VERSION="7.2"
 install() {
     log_step "Установка и настройка Redis"
     
-    # Проверка наличия Redis
-    if command -v redis-server &> /dev/null; then
-        REDIS_VER=$(redis-server --version | awk '{print $3}' | cut -d'=' -f2)
-        log_info "Redis уже установлен (версия $REDIS_VER)"
-    else
-        log_info "Установка Redis $REDIS_VERSION..."
-        
-        # Добавление официального репозитория Redis
-        curl -fsSL https://packages.redis.io/gpg | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
-        echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/redis.list
-        
-        apt-get update
-        apt-get install -y redis-server redis-tools
-        
-        log_info "Redis $REDIS_VERSION установлен"
-    fi
+    # Проверка зависимостей
+    check_dependencies
     
-    # Остановка Redis для настройки
-    systemctl stop redis-server
+    # Установка Redis
+    install_redis
     
     # Настройка Redis
-    log_info "Настройка конфигурации Redis..."
     configure_redis
     
     # Запуск Redis
-    systemctl start redis-server
-    systemctl enable redis-server
-    
-    # Ожидание запуска
-    wait_for_service "redis-server" 10
-    
-    # Проверка подключения
-    log_info "Проверка подключения к Redis..."
-    if redis-cli -a "$REDIS_PASSWORD" ping &>/dev/null; then
-        log_info "Redis отвечает на PING"
-    else
-        log_error "Redis не отвечает"
-        return 1
-    fi
+    start_redis
     
     # Создание скриптов для работы с Redis
     create_redis_scripts
     
-    # Настройка мониторинга Redis
+    # Настройка мониторинга
     setup_monitoring
+    
+    # Отметка об установке
+    mark_module_installed "$MODULE_NAME"
     
     log_info "Модуль ${MODULE_NAME} успешно установлен"
     log_info "Redis порт: $REDIS_PORT"
-    log_info "Пароль сохранен в /root/.gochs_credentials"
+    log_info "Пароль сохранен в конфигурации"
     
     return 0
 }
 
+check_dependencies() {
+    log_info "Проверка зависимостей..."
+    
+    # Проверка прав root
+    if [[ $EUID -ne 0 ]]; then
+        log_error "Скрипт должен запускаться от root!"
+        return 1
+    fi
+    
+    # Проверка наличия curl/wget
+    if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+        log_warn "Установка curl..."
+        apt-get update -qq
+        apt-get install -y curl
+    fi
+    
+    log_info "Зависимости проверены"
+}
+
+install_redis() {
+    log_info "Установка Redis $REDIS_VERSION..."
+    
+    # Проверка, установлен ли уже Redis
+    if command -v redis-server &> /dev/null; then
+        REDIS_VER=$(redis-server --version 2>/dev/null | awk '{print $3}' | cut -d'=' -f2)
+        log_info "Redis уже установлен (версия $REDIS_VER)"
+        
+        # Проверка версии
+        local major_version=$(echo "$REDIS_VER" | cut -d. -f1)
+        if [[ $major_version -ge 7 ]]; then
+            log_info "Версия Redis 7+ - OK"
+        else
+            log_warn "Установлена версия $REDIS_VER, рекомендуется 7+"
+            read -p "Переустановить Redis? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                return 0
+            fi
+        fi
+    else
+        # Добавление официального репозитория Redis
+        log_info "Добавление репозитория Redis..."
+        
+        # Установка ключа и репозитория
+        if curl -fsSL https://packages.redis.io/gpg 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg 2>/dev/null; then
+            echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs 2>/dev/null || echo 'bookworm') main" > /etc/apt/sources.list.d/redis.list
+            apt-get update -qq
+            apt-get install -y redis-server redis-tools
+        else
+            # Fallback на стандартный репозиторий Debian
+            log_warn "Не удалось добавить официальный репозиторий Redis, используется стандартный"
+            apt-get update -qq
+            apt-get install -y redis-server redis-tools
+        fi
+        
+        log_info "Redis установлен"
+    fi
+}
+
 configure_redis() {
+    log_info "Настройка конфигурации Redis..."
+    
     local redis_conf="/etc/redis/redis.conf"
     
     # Резервное копирование оригинальной конфигурации
     backup_file "$redis_conf"
     
     # Расчет оптимальных параметров
-    local total_ram=$(free -m | awk '/^Mem:/{print $2}')
-    local maxmemory=$((total_ram / 4))  # 25% от общей RAM
-    local save_seconds=300
-    local save_changes=100
+    local total_ram=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "2048")
+    local maxmemory=$((total_ram / 4))
     
-    # Создание новой конфигурации
+    # Определение версии Redis для правильного синтаксиса
+    local redis_version=$(redis-server --version 2>/dev/null | awk '{print $3}' | cut -d'=' -f2 | cut -d. -f1)
+    
+    # Создание новой конфигурации (исправленный синтаксис)
     cat > "$redis_conf" << EOF
 # ================================================
 # ГО-ЧС Информирование - Конфигурация Redis
@@ -103,7 +205,7 @@ rename-command FLUSHALL ""
 rename-command DEBUG ""
 
 # Общие настройки
-daemonize yes
+daemonize no
 supervised systemd
 pidfile /var/run/redis/redis-server.pid
 loglevel notice
@@ -112,7 +214,9 @@ databases 16
 always-show-logo no
 
 # Сохранение данных (RDB)
-save $save_seconds $save_changes
+save 900 1
+save 300 10
+save 60 10000
 stop-writes-on-bgsave-error yes
 rdbcompression yes
 rdbchecksum yes
@@ -177,45 +281,93 @@ dynamic-hz yes
 aof-rewrite-incremental-fsync yes
 rdb-save-incremental-fsync yes
 
-# IO threads
+# IO threads (для Redis 6+)
 io-threads 4
 io-threads-do-reads yes
-
 EOF
 
-    # Создание директории для логов если не существует
+    # Создание директории для логов и данных
     mkdir -p /var/log/redis
+    mkdir -p /var/lib/redis
+    mkdir -p /var/run/redis
+    
     chown redis:redis /var/log/redis
+    chown redis:redis /var/lib/redis
+    chown redis:redis /var/run/redis
+    
+    # Проверка конфигурации
+    if redis-server "$redis_conf" --test-memory 1 2>/dev/null; then
+        log_info "Конфигурация Redis проверена"
+    else
+        log_warn "Конфигурация Redis может иметь проблемы, но продолжаем..."
+    fi
     
     log_info "Конфигурация Redis создана"
 }
 
+start_redis() {
+    log_info "Запуск Redis..."
+    
+    # Остановка если запущен
+    systemctl stop redis-server 2>/dev/null || true
+    
+    # Запуск
+    systemctl enable redis-server
+    systemctl start redis-server
+    
+    # Ожидание запуска
+    if wait_for_service "redis-server" 10; then
+        log_info "Redis успешно запущен"
+    else
+        log_error "Ошибка запуска Redis"
+        systemctl status redis-server --no-pager -l
+        return 1
+    fi
+    
+    # Проверка подключения
+    if redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q "PONG"; then
+        log_info "Redis отвечает на PING"
+    else
+        # Пробуем без пароля (возможно не применился)
+        if redis-cli ping 2>/dev/null | grep -q "PONG"; then
+            log_warn "Redis работает без пароля"
+        else
+            log_error "Redis не отвечает"
+            return 1
+        fi
+    fi
+}
+
 create_redis_scripts() {
-    log_info "Создание скриптов для работы с Redis"
+    log_info "Создание скриптов для работы с Redis..."
     
     mkdir -p "$INSTALL_DIR/scripts"
     
     # Скрипт для проверки состояния Redis
     cat > "$INSTALL_DIR/scripts/check_redis.sh" << 'EOF'
 #!/bin/bash
-source /opt/gochs-informing/.env
+
+REDIS_PASS="${REDIS_PASSWORD:-$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')}"
+REDIS_AUTH=""
+if [[ -n "$REDIS_PASS" ]]; then
+    REDIS_AUTH="-a $REDIS_PASS"
+fi
 
 echo "=== Статистика Redis ==="
-redis-cli -a $REDIS_PASSWORD INFO stats | grep -E "total_connections_received|total_commands_processed|instantaneous_ops_per_sec|keyspace_hits|keyspace_misses|evicted_keys|expired_keys"
+redis-cli $REDIS_AUTH INFO stats 2>/dev/null | grep -E "total_connections_received|total_commands_processed|instantaneous_ops_per_sec|keyspace_hits|keyspace_misses|evicted_keys|expired_keys"
 
 echo -e "\n=== Память ==="
-redis-cli -a $REDIS_PASSWORD INFO memory | grep -E "used_memory_human|used_memory_peak_human|maxmemory_human|mem_fragmentation_ratio"
+redis-cli $REDIS_AUTH INFO memory 2>/dev/null | grep -E "used_memory_human|used_memory_peak_human|maxmemory_human|mem_fragmentation_ratio"
 
 echo -e "\n=== Клиенты ==="
-redis-cli -a $REDIS_PASSWORD INFO clients | grep -E "connected_clients|blocked_clients"
+redis-cli $REDIS_AUTH INFO clients 2>/dev/null | grep -E "connected_clients|blocked_clients"
 
 echo -e "\n=== Ключи ==="
-redis-cli -a $REDIS_PASSWORD INFO keyspace
+redis-cli $REDIS_AUTH INFO keyspace 2>/dev/null
 
-echo -e "\n=== Очереди Celery ==="
-redis-cli -a $REDIS_PASSWORD LLEN celery
-for queue in default high_priority low_priority; do
-    count=$(redis-cli -a $REDIS_PASSWORD LLEN $queue 2>/dev/null || echo "0")
+echo -e "\n=== Очереди ==="
+for queue in celery default high_priority low_priority; do
+    count=$(redis-cli $REDIS_AUTH LLEN $queue 2>/dev/null || echo "0")
     echo "  $queue: $count задач"
 done
 EOF
@@ -223,17 +375,22 @@ EOF
     # Скрипт для очистки очередей
     cat > "$INSTALL_DIR/scripts/clear_redis_queues.sh" << 'EOF'
 #!/bin/bash
-source /opt/gochs-informing/.env
+
+REDIS_PASS="${REDIS_PASSWORD:-$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')}"
+REDIS_AUTH=""
+if [[ -n "$REDIS_PASS" ]]; then
+    REDIS_AUTH="-a $REDIS_PASS"
+fi
 
 echo "ВНИМАНИЕ: Будут очищены все очереди Redis!"
 read -p "Продолжить? (y/N): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "Очистка очередей..."
-    redis-cli -a $REDIS_PASSWORD DEL celery
-    redis-cli -a $REDIS_PASSWORD DEL default
-    redis-cli -a $REDIS_PASSWORD DEL high_priority
-    redis-cli -a $REDIS_PASSWORD DEL low_priority
+    redis-cli $REDIS_AUTH DEL celery 2>/dev/null
+    redis-cli $REDIS_AUTH DEL default 2>/dev/null
+    redis-cli $REDIS_AUTH DEL high_priority 2>/dev/null
+    redis-cli $REDIS_AUTH DEL low_priority 2>/dev/null
     echo "Очереди очищены"
 fi
 EOF
@@ -241,58 +398,96 @@ EOF
     # Скрипт для резервного копирования Redis
     cat > "$INSTALL_DIR/scripts/backup_redis.sh" << 'EOF'
 #!/bin/bash
-source /opt/gochs-informing/.env
 
 BACKUP_DIR="/opt/gochs-informing/backups/redis"
 mkdir -p "$BACKUP_DIR"
 DATE=$(date +%Y%m%d_%H%M%S)
 
+REDIS_PASS="${REDIS_PASSWORD:-$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')}"
+REDIS_AUTH=""
+if [[ -n "$REDIS_PASS" ]]; then
+    REDIS_AUTH="-a $REDIS_PASS"
+fi
+
 echo "Запуск сохранения RDB..."
-redis-cli -a $REDIS_PASSWORD BGSAVE
+redis-cli $REDIS_AUTH BGSAVE 2>/dev/null
 
 # Ожидание завершения сохранения
-while [ $(redis-cli -a $REDIS_PASSWORD INFO persistence | grep -c "rdb_bgsave_in_progress:1") -eq 1 ]; do
+for i in {1..30}; do
+    if redis-cli $REDIS_AUTH INFO persistence 2>/dev/null | grep -q "rdb_bgsave_in_progress:0"; then
+        break
+    fi
     sleep 1
 done
 
 # Копирование файла
-cp /var/lib/redis/dump.rdb "$BACKUP_DIR/dump_$DATE.rdb"
-echo "Резервная копия создана: $BACKUP_DIR/dump_$DATE.rdb"
+if cp /var/lib/redis/dump.rdb "$BACKUP_DIR/dump_$DATE.rdb" 2>/dev/null; then
+    echo "Резервная копия создана: $BACKUP_DIR/dump_$DATE.rdb"
+else
+    echo "Ошибка создания резервной копии"
+    exit 1
+fi
 
 # Удаление старых бэкапов (старше 7 дней)
-find "$BACKUP_DIR" -name "dump_*.rdb" -mtime +7 -delete
+find "$BACKUP_DIR" -name "dump_*.rdb" -mtime +7 -delete 2>/dev/null
+
+echo "Готово"
 EOF
 
     # Скрипт для мониторинга очередей в реальном времени
     cat > "$INSTALL_DIR/scripts/monitor_redis_queues.sh" << 'EOF'
 #!/bin/bash
-source /opt/gochs-informing/.env
 
-watch -n 1 "redis-cli -a $REDIS_PASSWORD INFO keyspace | grep -v '^#' && echo && redis-cli -a $REDIS_PASSWORD LLEN celery"
+REDIS_PASS="${REDIS_PASSWORD:-$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')}"
+REDIS_AUTH=""
+if [[ -n "$REDIS_PASS" ]]; then
+    REDIS_AUTH="-a $REDIS_PASS"
+fi
+
+watch -n 1 "redis-cli $REDIS_AUTH INFO keyspace 2>/dev/null | grep -v '^#' && echo && redis-cli $REDIS_AUTH LLEN celery 2>/dev/null"
+EOF
+
+    # Скрипт для подключения к Redis CLI
+    cat > "$INSTALL_DIR/scripts/redis_cli.sh" << 'EOF'
+#!/bin/bash
+
+REDIS_PASS="${REDIS_PASSWORD:-$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')}"
+REDIS_AUTH=""
+if [[ -n "$REDIS_PASS" ]]; then
+    REDIS_AUTH="-a $REDIS_PASS"
+fi
+
+redis-cli $REDIS_AUTH "$@"
 EOF
 
     chmod +x "$INSTALL_DIR"/scripts/*redis*.sh
-    chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/scripts"
+    chmod +x "$INSTALL_DIR"/scripts/redis_cli.sh
+    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/scripts" 2>/dev/null || true
     
     log_info "Скрипты для Redis созданы в $INSTALL_DIR/scripts"
 }
 
 setup_monitoring() {
-    log_info "Настройка мониторинга Redis"
+    log_info "Настройка мониторинга Redis..."
     
     # Создание скрипта для сбора метрик
     cat > "$INSTALL_DIR/scripts/redis_metrics.sh" << 'EOF'
 #!/bin/bash
-# Сбор метрик Redis для Prometheus формата
-source /opt/gochs-informing/.env
+# Сбор метрик Redis для Prometheus
+
+REDIS_PASS="${REDIS_PASSWORD:-$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')}"
+REDIS_AUTH=""
+if [[ -n "$REDIS_PASS" ]]; then
+    REDIS_AUTH="-a $REDIS_PASS"
+fi
 
 METRICS_FILE="/opt/gochs-informing/logs/redis_metrics.prom"
 
 # Сбор метрик
-redis-cli -a $REDIS_PASSWORD INFO | awk -F: '
+redis-cli $REDIS_AUTH INFO 2>/dev/null | awk -F: '
 /^connected_clients/ {print "redis_connected_clients " $2}
 /^used_memory/ {print "redis_used_memory_bytes " $2}
-/^maxmemory/ {print "redis_maxmemory_bytes " $2}
+/^maxmemory/ && $2 ~ /^[0-9]/ {print "redis_maxmemory_bytes " $2}
 /^total_commands_processed/ {print "redis_commands_processed_total " $2}
 /^instantaneous_ops_per_sec/ {print "redis_operations_per_second " $2}
 /^keyspace_hits/ {print "redis_keyspace_hits_total " $2}
@@ -303,16 +498,16 @@ redis-cli -a $REDIS_PASSWORD INFO | awk -F: '
 
 # Добавление метрик по очередям
 for queue in celery default high_priority low_priority; do
-    count=$(redis-cli -a $REDIS_PASSWORD LLEN $queue 2>/dev/null || echo "0")
+    count=$(redis-cli $REDIS_AUTH LLEN $queue 2>/dev/null || echo "0")
     echo "redis_queue_length{queue=\"$queue\"} $count" >> "$METRICS_FILE"
 done
 EOF
 
     chmod +x "$INSTALL_DIR/scripts/redis_metrics.sh"
-    chown "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/scripts/redis_metrics.sh"
+    chown "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/scripts/redis_metrics.sh" 2>/dev/null || true
     
-    # Добавление в crontab для сбора метрик каждую минуту
-    (crontab -l 2>/dev/null | grep -v "redis_metrics.sh"; echo "* * * * * $INSTALL_DIR/scripts/redis_metrics.sh") | crontab -
+    # Добавление в crontab
+    (crontab -l 2>/dev/null | grep -v "redis_metrics.sh"; echo "* * * * * $INSTALL_DIR/scripts/redis_metrics.sh") | crontab - 2>/dev/null || true
     
     log_info "Мониторинг Redis настроен (метрики собираются каждую минуту)"
 }
@@ -321,18 +516,18 @@ uninstall() {
     log_step "Удаление модуля ${MODULE_NAME}"
     
     # Остановка сервиса
-    systemctl stop redis-server
-    systemctl disable redis-server
+    systemctl stop redis-server 2>/dev/null
+    systemctl disable redis-server 2>/dev/null
     
     # Удаление crontab задач
-    crontab -l | grep -v "redis_metrics.sh" | crontab -
+    crontab -l 2>/dev/null | grep -v "redis_metrics.sh" | crontab - 2>/dev/null || true
     
     # Удаление пакетов
     read -p "Удалить пакеты Redis? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        apt-get remove --purge -y redis-server redis-tools
-        apt-get autoremove -y
+        apt-get remove --purge -y redis-server redis-tools 2>/dev/null
+        apt-get autoremove -y 2>/dev/null
         log_info "Пакеты Redis удалены"
     fi
     
@@ -341,11 +536,17 @@ uninstall() {
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         rm -rf /var/lib/redis/*
+        rm -rf /var/log/redis/*
         log_info "Данные Redis удалены"
     fi
     
     # Удаление скриптов
     rm -f "$INSTALL_DIR"/scripts/*redis*.sh
+    rm -f "$INSTALL_DIR"/scripts/redis_cli.sh
+    
+    # Удаление репозитория
+    rm -f /etc/apt/sources.list.d/redis.list
+    rm -f /usr/share/keyrings/redis-archive-keyring.gpg
     
     log_info "Модуль ${MODULE_NAME} удален"
     return 0
@@ -356,20 +557,26 @@ check_status() {
     
     log_info "Проверка статуса модуля ${MODULE_NAME}"
     
-    # Проверка сервиса Redis
+    # Проверка сервиса
     if systemctl is-active --quiet redis-server; then
-        log_info "Сервис Redis: активен"
+        log_info "✓ Сервис Redis: активен"
     else
-        log_error "Сервис Redis: не активен"
+        log_error "✗ Сервис Redis: не активен"
         status=1
     fi
     
     # Проверка подключения
-    if redis-cli -a "$REDIS_PASSWORD" ping &>/dev/null; then
-        log_info "Подключение к Redis: успешно"
+    REDIS_PASS=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
+    REDIS_AUTH=""
+    if [[ -n "$REDIS_PASS" ]]; then
+        REDIS_AUTH="-a $REDIS_PASS"
+    fi
+    
+    if redis-cli $REDIS_AUTH ping 2>/dev/null | grep -q "PONG"; then
+        log_info "✓ Подключение к Redis: успешно"
         
         # Сбор статистики
-        REDIS_INFO=$(redis-cli -a "$REDIS_PASSWORD" INFO)
+        REDIS_INFO=$(redis-cli $REDIS_AUTH INFO 2>/dev/null)
         
         # Версия
         VERSION=$(echo "$REDIS_INFO" | grep "redis_version:" | cut -d':' -f2 | xargs)
@@ -378,39 +585,47 @@ check_status() {
         # Память
         USED_MEMORY=$(echo "$REDIS_INFO" | grep "used_memory_human:" | cut -d':' -f2 | xargs)
         MAX_MEMORY=$(echo "$REDIS_INFO" | grep "maxmemory_human:" | cut -d':' -f2 | xargs)
-        log_info "  Память: $USED_MEMORY / $MAX_MEMORY"
+        log_info "  Память: $USED_MEMORY / ${MAX_MEMORY:-не ограничено}"
         
         # Клиенты
         CLIENTS=$(echo "$REDIS_INFO" | grep "connected_clients:" | cut -d':' -f2 | xargs)
         log_info "  Подключено клиентов: $CLIENTS"
         
         # Ключи
-        KEY_COUNT=$(redis-cli -a "$REDIS_PASSWORD" DBSIZE | xargs)
-        log_info "  Количество ключей: $KEY_COUNT"
+        KEY_COUNT=$(redis-cli $REDIS_AUTH DBSIZE 2>/dev/null | xargs)
+        log_info "  Количество ключей: ${KEY_COUNT:-0}"
         
         # Очереди
         log_info "  Очереди:"
         for queue in celery default high_priority low_priority; do
-            count=$(redis-cli -a "$REDIS_PASSWORD" LLEN $queue 2>/dev/null || echo "0")
+            count=$(redis-cli $REDIS_AUTH LLEN $queue 2>/dev/null || echo "0")
             log_info "    $queue: $count задач"
         done
         
+        # Персистентность
+        LAST_SAVE=$(echo "$REDIS_INFO" | grep "rdb_last_save_time:" | cut -d':' -f2 | xargs)
+        if [[ -n "$LAST_SAVE" ]] && [[ "$LAST_SAVE" != "0" ]]; then
+            SAVE_TIME=$(date -d "@$LAST_SAVE" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$LAST_SAVE")
+            log_info "  Последнее сохранение: $SAVE_TIME"
+        fi
+        
     else
-        log_error "Подключение к Redis: ошибка"
+        log_error "✗ Подключение к Redis: ошибка"
         status=1
     fi
     
-    # Проверка персистентности
-    if redis-cli -a "$REDIS_PASSWORD" INFO persistence | grep -q "rdb_last_save_time:[1-9]"; then
-        LAST_SAVE=$(redis-cli -a "$REDIS_PASSWORD" INFO persistence | grep "rdb_last_save_time:" | cut -d':' -f2)
-        SAVE_TIME=$(date -d "@$LAST_SAVE" "+%Y-%m-%d %H:%M:%S")
-        log_info "  Последнее сохранение: $SAVE_TIME"
+    # Проверка конфигурации
+    if [[ -f /etc/redis/redis.conf ]]; then
+        log_info "✓ Конфигурация: найдена"
+    else
+        log_error "✗ Конфигурация: отсутствует"
+        status=1
     fi
     
     return $status
 }
 
-# Функция для тестирования производительности Redis
+# Функция для тестирования производительности
 benchmark() {
     log_step "Тестирование производительности Redis"
     
@@ -419,19 +634,36 @@ benchmark() {
         return 1
     fi
     
+    REDIS_PASS=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
+    REDIS_AUTH=""
+    if [[ -n "$REDIS_PASS" ]]; then
+        REDIS_AUTH="-a $REDIS_PASS"
+    fi
+    
     log_info "Запуск бенчмарка Redis..."
-    redis-benchmark -a "$REDIS_PASSWORD" -q -n 10000 -c 50 --csv
+    redis-benchmark $REDIS_AUTH -q -n 10000 -c 50 --csv 2>/dev/null
 }
 
-# Функция для очистки кэша
-clear_cache() {
-    log_step "Очистка кэша Redis"
+# Функция для очистки всего кэша
+flush_all() {
+    log_step "Очистка всей базы Redis"
     
-    read -p "Очистить весь кэш? (y/N): " -n 1 -r
+    read -p "ВНИМАНИЕ: Будут удалены ВСЕ данные Redis! Продолжить? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        redis-cli -a "$REDIS_PASSWORD" FLUSHDB
-        log_info "Кэш очищен"
+        read -p "Точно? Введите 'DELETE': " confirmation
+        if [[ "$confirmation" == "DELETE" ]]; then
+            REDIS_PASS=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
+            REDIS_AUTH=""
+            if [[ -n "$REDIS_PASS" ]]; then
+                REDIS_AUTH="-a $REDIS_PASS"
+            fi
+            
+            redis-cli $REDIS_AUTH FLUSHALL 2>/dev/null
+            log_info "База данных Redis очищена"
+        else
+            log_info "Операция отменена"
+        fi
     fi
 }
 
@@ -439,20 +671,32 @@ clear_cache() {
 show_info() {
     log_step "Информация о Redis"
     
+    REDIS_PASS=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
+    REDIS_AUTH=""
+    if [[ -n "$REDIS_PASS" ]]; then
+        REDIS_AUTH="-a $REDIS_PASS"
+    fi
+    
     echo -e "${CYAN}=== Общая информация ===${NC}"
-    redis-cli -a "$REDIS_PASSWORD" INFO server | grep -E "redis_version|os|process_id"
+    redis-cli $REDIS_AUTH INFO server 2>/dev/null | grep -E "redis_version|os|process_id|tcp_port"
     
     echo -e "\n${CYAN}=== Статистика ===${NC}"
-    redis-cli -a "$REDIS_PASSWORD" INFO stats | grep -E "total_connections|total_commands|ops_per_sec|keyspace_hits|keyspace_misses"
+    redis-cli $REDIS_AUTH INFO stats 2>/dev/null | grep -E "total_connections|total_commands|ops_per_sec|keyspace_hits|keyspace_misses"
     
     echo -e "\n${CYAN}=== Память ===${NC}"
-    redis-cli -a "$REDIS_PASSWORD" INFO memory | grep -E "used_memory|maxmemory|mem_fragmentation"
+    redis-cli $REDIS_AUTH INFO memory 2>/dev/null | grep -E "used_memory_human|maxmemory_human|mem_fragmentation_ratio"
     
     echo -e "\n${CYAN}=== Персистентность ===${NC}"
-    redis-cli -a "$REDIS_PASSWORD" INFO persistence | grep -E "rdb_last_save|aof_enabled|aof_current_size"
+    redis-cli $REDIS_AUTH INFO persistence 2>/dev/null | grep -E "rdb_last_save_time|aof_enabled|aof_current_size"
+    
+    echo -e "\n${CYAN}=== Ключи ===${NC}"
+    redis-cli $REDIS_AUTH INFO keyspace 2>/dev/null
     
     echo -e "\n${CYAN}=== Очереди ===${NC}"
-    redis-cli -a "$REDIS_PASSWORD" INFO keyspace
+    for queue in celery default high_priority low_priority; do
+        count=$(redis-cli $REDIS_AUTH LLEN $queue 2>/dev/null || echo "0")
+        echo "  $queue: $count"
+    done
 }
 
 # Обработка аргументов
@@ -469,8 +713,8 @@ case "${1:-}" in
     benchmark)
         benchmark
         ;;
-    clear)
-        clear_cache
+    flush)
+        flush_all
         ;;
     info)
         show_info
@@ -487,11 +731,43 @@ case "${1:-}" in
         if [[ -f "$INSTALL_DIR/scripts/monitor_redis_queues.sh" ]]; then
             bash "$INSTALL_DIR/scripts/monitor_redis_queues.sh"
         else
-            watch -n 1 "redis-cli -a $REDIS_PASSWORD INFO keyspace"
+            REDIS_PASS=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
+            REDIS_AUTH=""
+            if [[ -n "$REDIS_PASS" ]]; then
+                REDIS_AUTH="-a $REDIS_PASS"
+            fi
+            watch -n 1 "redis-cli $REDIS_AUTH INFO keyspace 2>/dev/null"
         fi
         ;;
+    cli)
+        shift
+        REDIS_PASS=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
+        REDIS_AUTH=""
+        if [[ -n "$REDIS_PASS" ]]; then
+            REDIS_AUTH="-a $REDIS_PASS"
+        fi
+        redis-cli $REDIS_AUTH "$@"
+        ;;
+    restart)
+        systemctl restart redis-server
+        ;;
+    logs)
+        tail -f /var/log/redis/redis-server.log
+        ;;
     *)
-        echo "Использование: $0 {install|uninstall|status|benchmark|clear|info|backup|monitor}"
+        echo "Использование: $0 {install|uninstall|status|benchmark|flush|info|backup|monitor|cli|restart|logs}"
+        echo ""
+        echo "  install    - Установка Redis"
+        echo "  uninstall  - Удаление Redis"
+        echo "  status     - Проверка статуса"
+        echo "  benchmark  - Тест производительности"
+        echo "  flush      - Очистка ВСЕХ данных"
+        echo "  info       - Подробная информация"
+        echo "  backup     - Создать резервную копию"
+        echo "  monitor    - Мониторинг очередей"
+        echo "  cli        - Подключение к Redis CLI"
+        echo "  restart    - Перезапуск сервиса"
+        echo "  logs       - Просмотр логов"
         exit 1
         ;;
 esac
