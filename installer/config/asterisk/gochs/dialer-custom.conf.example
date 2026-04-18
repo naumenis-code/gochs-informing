@@ -1,0 +1,46 @@
+; =====================================================
+; ПРИМЕР ПОЛЬЗОВАТЕЛЬСКИХ НАСТРОЕК ДИАЛЕРА
+; =====================================================
+
+[gochs-dialer-custom]
+; =====================================================
+; КАСТОМНЫЕ РЕЖИМЫ И НАСТРОЙКИ
+; =====================================================
+
+; Приоритетный обзвон определенных групп
+exten => priority-start,1,NoOp(Приоритетный обзвон)
+ same => n,Set(CAMPAIGN_ID=${ARG1})
+ same => n,Set(PRIORITY_GROUPS=${ARG2})
+ 
+ ; Загрузка приоритетных контактов
+ same => n(load-priority),NoOp(Загрузка приоритетных контактов)
+ same => n,Set(CONTACTS=${SHELL(redis-cli -a ${REDIS_PASSWORD} SMEMBERS gochs:group:${PRIORITY_GROUPS}:contacts)})
+ 
+ ; Добавление в начало очереди
+ same => n(priority-loop),NoOp(Добавление в начало)
+ same => n,Set(CONTACT_ID=${POP(CONTACTS)})
+ same => n,GotoIf($[${ISNULL(${CONTACT_ID})}]?done)
+ same => n,System(redis-cli -a ${REDIS_PASSWORD} LPUSH gochs:campaign:${CAMPAIGN_ID}:queue "${CONTACT_ID}")
+ same => n,Goto(priority-loop)
+ 
+ same => n(done),Goto(gochs-dialer-main,start,1(${CAMPAIGN_ID}))
+
+; Обзвон с учетом часовых поясов
+exten => timezone-aware,1,NoOp(Обзвон с учетом часовых поясов)
+ same => n,Set(CAMPAIGN_ID=${ARG1})
+ same => n,Set(CONTACT_ID=${ARG2})
+ same => n,Set(TIMEZONE=${SHELL(redis-cli -a ${REDIS_PASSWORD} HGET gochs:contact:${CONTACT_ID} timezone)})
+ 
+ ; Проверка локального времени контакта
+ same => n,Set(LOCAL_HOUR=${SHELL(TZ=${TIMEZONE} date +%H)})
+ 
+ same => n,GotoIf($[${LOCAL_HOUR} < 9]?reschedule)
+ same => n,GotoIf($[${LOCAL_HOUR} > 21]?reschedule)
+ same => n,Goto(make-call)
+ 
+ same => n(reschedule),NoOp(Перенос на утро по времени контакта)
+ same => n,Set(RESCHEDULE_TIME=${SHELL(date -d "tomorrow 09:00 ${TIMEZONE}" +%s)})
+ same => n,System(redis-cli -a ${REDIS_PASSWORD} ZADD gochs:campaign:${CAMPAIGN_ID}:retry_queue ${RESCHEDULE_TIME} "${CONTACT_ID}")
+ same => n,Return()
+ 
+ same => n(make-call),Goto(gochs-dialer-make-call,s,1)
