@@ -3,7 +3,7 @@
 ################################################################################
 # Модуль: 05-asterisk.sh
 # Назначение: Установка и настройка Asterisk 20 LTS
-# Версия: 1.0.5 (исправленная полная версия)
+# Версия: 1.0.2 (исправленная - полная версия)
 ################################################################################
 
 # Определение путей
@@ -21,7 +21,6 @@ if ! type log_info &>/dev/null; then
     YELLOW='\033[1;33m'
     BLUE='\033[0;34m'
     CYAN='\033[0;36m'
-    WHITE='\033[1;37m'
     NC='\033[0m'
     
     log_info() { echo -e "${GREEN}[INFO]${NC} $(date '+%H:%M:%S') $*"; }
@@ -64,7 +63,7 @@ if ! type log_info &>/dev/null; then
         fi
     }
     generate_password() {
-        openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "AstPass$(date +%s)"
+        openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "ChangeMe$(date +%s)"
     }
 fi
 
@@ -87,25 +86,86 @@ else
     ASTERISK_AMI_USER="${ASTERISK_AMI_USER:-gochs_ami}"
     ASTERISK_AMI_PASSWORD="${ASTERISK_AMI_PASSWORD:-$(generate_password)}"
     ASTERISK_ARI_PASSWORD="${ASTERISK_ARI_PASSWORD:-$(generate_password)}"
+    GOCHS_USER="${GOCHS_USER:-gochs}"
+    GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 fi
 
-# Версия Asterisk (исправлена на актуальную LTS)
+# Версия Asterisk
 ASTERISK_VERSION="20"
+ASTERISK_FALLBACK_VERSION="20.11.1"
 ASTERISK_FULL_VERSION="20.11.0"
 ASTERISK_DOWNLOAD_URL="http://downloads.asterisk.org/pub/telephony/asterisk"
+
+# ============================================================================
+# ИСПРАВЛЕНИЕ 1: Функция проверки доступности версии и автоопределения
+# ============================================================================
+check_version_availability() {
+    log_info "Проверка доступности Asterisk $ASTERISK_FULL_VERSION..."
+    
+    # Проверяем существование файла
+    if wget --spider --timeout=10 "$ASTERISK_DOWNLOAD_URL/asterisk-${ASTERISK_FULL_VERSION}.tar.gz" 2>/dev/null; then
+        log_info "Версия $ASTERISK_FULL_VERSION доступна"
+        return 0
+    fi
+    
+    log_warn "Версия $ASTERISK_FULL_VERSION не найдена на сервере"
+    
+    # Пытаемся получить список доступных версий
+    local latest_version=$(wget -q -O- http://downloads.asterisk.org/pub/telephony/asterisk/ 2>/dev/null | \
+                          grep -oP "asterisk-20\.\d+\.\d+" | \
+                          sort -V | tail -1 | cut -d'-' -f2)
+    
+    if [[ -n "$latest_version" ]]; then
+        ASTERISK_FULL_VERSION="$latest_version"
+        log_info "Найдена актуальная версия: $ASTERISK_FULL_VERSION"
+        return 0
+    fi
+    
+    # Альтернативные версии
+    local fallbacks=("20.11.1" "20.10.0" "20.9.0" "20.8.0" "20.7.0")
+    for ver in "${fallbacks[@]}"; do
+        if wget --spider --timeout=5 "$ASTERISK_DOWNLOAD_URL/asterisk-${ver}.tar.gz" 2>/dev/null; then
+            ASTERISK_FULL_VERSION="$ver"
+            log_info "Используем fallback версию: $ASTERISK_FULL_VERSION"
+            return 0
+        fi
+    done
+    
+    log_error "Не удалось найти доступную версию Asterisk 20"
+    return 1
+}
 
 install() {
     log_step "Установка Asterisk $ASTERISK_VERSION LTS"
     
+    # Проверка зависимостей
     check_dependencies
+    
+    # ИСПРАВЛЕНИЕ: Проверка доступности версии перед установкой
+    check_version_availability || return 1
+    
+    # Установка Asterisk
     install_asterisk
+    
+    # Настройка Asterisk
     configure_asterisk
+    
+    # Создание директорий для ГО-ЧС
     create_directories
+    
+    # Настройка systemd службы
     configure_systemd
+    
+    # Запуск Asterisk
     start_asterisk
+    
+    # Создание скриптов управления
     create_management_scripts
+    
+    # Настройка интеграции с API
     setup_api_integration
     
+    # Отметка об установке
     mark_module_installed "$MODULE_NAME"
     
     log_info "Модуль ${MODULE_NAME} успешно установлен"
@@ -119,6 +179,7 @@ install() {
 check_dependencies() {
     log_info "Проверка зависимостей..."
     
+    # Проверка прав root
     if [[ $EUID -ne 0 ]]; then
         log_error "Скрипт должен запускаться от root!"
         return 1
@@ -134,8 +195,8 @@ check_dependencies() {
     
     if [[ -n "$missing_tools" ]]; then
         log_warn "Установка недостающих инструментов:$missing_tools"
-        apt-get update -qq 2>/dev/null || true
-        apt-get install -y $missing_tools 2>/dev/null || true
+        apt-get update -qq
+        apt-get install -y $missing_tools
     fi
     
     log_info "Зависимости проверены"
@@ -176,7 +237,8 @@ install_asterisk() {
         libpopt-dev libnewt-dev libtiff-dev libresample1-dev libltdl-dev \
         libvorbis-dev libogg-dev libopus-dev libgsm1-dev \
         libspeex-dev libspeexdsp-dev libsndfile1-dev unixodbc-dev \
-        libsrtp2-dev libspandsp-dev libopenr2-dev 2>/dev/null || true
+        libsrtp2-dev libspandsp-dev libopenr2-dev \
+        libgmime-3.0-dev liburiparser-dev 2>/dev/null || true
 
     # Скачивание Asterisk
     log_info "Скачивание Asterisk $ASTERISK_FULL_VERSION..."
@@ -185,12 +247,13 @@ install_asterisk() {
     # Удаление старых архивов если есть
     rm -rf asterisk-${ASTERISK_FULL_VERSION}* 2>/dev/null || true
     
-    # Скачивание с проверкой зеркал
+    # ИСПРАВЛЕНИЕ 2: Добавлены дополнительные зеркала
     local download_success=false
     local mirrors=(
         "$ASTERISK_DOWNLOAD_URL/asterisk-${ASTERISK_FULL_VERSION}.tar.gz"
         "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_FULL_VERSION}.tar.gz"
         "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_FULL_VERSION}.tar.gz"
+        "https://downloads.asterisk.org/pub/telephony/asterisk/old-releases/asterisk-${ASTERISK_FULL_VERSION}.tar.gz"
     )
     
     for mirror in "${mirrors[@]}"; do
@@ -202,22 +265,8 @@ install_asterisk() {
     done
     
     if [[ "$download_success" != "true" ]]; then
-        log_error "Не удалось скачать Asterisk $ASTERISK_FULL_VERSION"
-        log_info "Попытка скачать последнюю версию 20 LTS..."
-        
-        # Получение списка доступных версий
-        local latest_version=$(wget -q -O- http://downloads.asterisk.org/pub/telephony/asterisk/ 2>/dev/null | grep -oP 'asterisk-20\.\d+\.\d+' | sort -V | tail -1 | cut -d'-' -f2)
-        if [[ -n "$latest_version" ]]; then
-            ASTERISK_FULL_VERSION="$latest_version"
-            log_info "Найдена версия: $ASTERISK_FULL_VERSION"
-            wget -q --show-progress "$ASTERISK_DOWNLOAD_URL/asterisk-${ASTERISK_FULL_VERSION}.tar.gz" || {
-                log_error "Не удалось скачать Asterisk"
-                return 1
-            }
-        else
-            log_error "Не удалось определить последнюю версию Asterisk"
-            return 1
-        fi
+        log_error "Не удалось скачать Asterisk. Проверьте версию."
+        return 1
     fi
     
     # Распаковка
@@ -303,7 +352,7 @@ configure_asterisk() {
     local asterisk_conf_dir="/etc/asterisk"
     
     # Создание директорий если нет
-    ensure_dir "$asterisk_conf_dir"
+    mkdir -p "$asterisk_conf_dir"
     
     # Резервное копирование оригинальных конфигураций
     for conf in asterisk.conf http.conf manager.conf pjsip.conf extensions.conf modules.conf logger.conf rtp.conf; do
@@ -618,11 +667,11 @@ create_directories() {
     log_info "Создание директорий для ГО-ЧС..."
     
     # Директории для записей и плейбуков
-    ensure_dir "$INSTALL_DIR/recordings/inbound"
-    ensure_dir "$INSTALL_DIR/recordings/outbound"
-    ensure_dir "$INSTALL_DIR/playbooks"
-    ensure_dir "$INSTALL_DIR/generated_voice"
-    ensure_dir "$INSTALL_DIR/logs"
+    mkdir -p "$INSTALL_DIR/recordings/inbound"
+    mkdir -p "$INSTALL_DIR/recordings/outbound"
+    mkdir -p "$INSTALL_DIR/playbooks"
+    mkdir -p "$INSTALL_DIR/generated_voice"
+    mkdir -p "$INSTALL_DIR/logs"
     
     # Установка прав
     chown -R asterisk:asterisk "$INSTALL_DIR/recordings" 2>/dev/null || true
@@ -702,7 +751,7 @@ start_asterisk() {
 create_management_scripts() {
     log_info "Создание скриптов управления Asterisk..."
     
-    ensure_dir "$INSTALL_DIR/scripts"
+    mkdir -p "$INSTALL_DIR/scripts"
     
     # Скрипт для подключения к консоли
     cat > "$INSTALL_DIR/scripts/asterisk_console.sh" << 'EOF'
@@ -961,14 +1010,8 @@ case "${1:-}" in
             echo "Использование: $0 test <номер>"
         fi
         ;;
-    clean)
-        log_info "Очистка временных файлов Asterisk..."
-        rm -rf /var/log/asterisk/* 2>/dev/null || true
-        rm -rf /var/spool/asterisk/voicemail/* 2>/dev/null || true
-        ;;
     *)
-        echo "Использование: $0 {install|uninstall|status|console|reload|restart|logs|test <номер>|clean}"
+        echo "Использование: $0 {install|uninstall|status|console|reload|restart|logs|test <номер>}"
         exit 1
         ;;
 esac
-echo "✅ 05-asterisk.sh создан полностью (100%)"
