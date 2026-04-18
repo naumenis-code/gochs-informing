@@ -80,7 +80,7 @@ cryptography==41.0.7
 # Asterisk Integration
 # ------------------------------------------------------------------------------
 pyst2==0.8.0
-py-asterisk==0.6.0
+py-asterisk==0.1.6
 panoramisk==1.4.1
 aioari==0.3.2
 websocket-client==1.6.4
