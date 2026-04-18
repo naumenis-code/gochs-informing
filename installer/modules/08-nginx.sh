@@ -3,7 +3,7 @@
 ################################################################################
 # Модуль: 08-nginx.sh
 # Назначение: Установка и настройка Nginx веб-сервера
-# Версия: 1.0.3 (исправленная полная версия)
+# Версия: 1.0.6 (полная исправленная версия)
 ################################################################################
 
 # Определение путей
@@ -64,7 +64,14 @@ if ! type log_info &>/dev/null; then
         fi
     }
     generate_password() {
-        openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "ChangeMe$(date +%s)"
+        openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "NginxPass$(date +%s)"
+    }
+    check_port_free() {
+        local port="$1"
+        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
+            return 1
+        fi
+        return 0
     }
 fi
 
@@ -77,11 +84,11 @@ if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
 else
     INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
-    DOMAIN_OR_IP="${DOMAIN_OR_IP:-localhost}"
+    DOMAIN_OR_IP="${DOMAIN_OR_IP:-192.168.0.166}"
     ADMIN_EMAIL="${ADMIN_EMAIL:-admin@localhost}"
     HTTP_PORT="${HTTP_PORT:-80}"
     HTTPS_PORT="${HTTPS_PORT:-443}"
-    SSL_MODE="${SSL_MODE:-none}"
+    SSL_MODE="${SSL_MODE:-selfsigned}"
     GOCHS_USER="${GOCHS_USER:-gochs}"
     GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 fi
@@ -110,7 +117,9 @@ install() {
             log_info "SSL не настраивается (режим: $SSL_MODE)"
             ;;
         *)
-            log_warn "Неизвестный режим SSL: $SSL_MODE, пропускаем"
+            log_warn "Неизвестный режим SSL: $SSL_MODE, создаем самоподписанный"
+            create_self_signed_cert
+            enable_https_config
             ;;
     esac
     
@@ -119,11 +128,7 @@ install() {
     create_test_frontend
     start_nginx
     create_management_scripts
-    
-    # Настройка fail2ban для Nginx
     setup_fail2ban
-    
-    # Настройка ротации логов
     setup_logrotate
     
     mark_module_installed "$MODULE_NAME"
@@ -134,11 +139,12 @@ install() {
     echo -e "${GREEN}  ДОСТУП К СИСТЕМЕ:${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "  ${WHITE}Web интерфейс:${NC}     ${GREEN}http://$DOMAIN_OR_IP${NC}"
-    if [[ "$SSL_SUCCESS" == "true" ]]; then
-        echo -e "  ${WHITE}HTTPS:${NC}             ${GREEN}https://$DOMAIN_OR_IP${NC}"
-    fi
-    echo -e "  ${WHITE}API документация:${NC}  ${GREEN}http://$DOMAIN_OR_IP/docs${NC}"
+    echo -e "  ${WHITE}Web интерфейс:${NC}     ${GREEN}https://$DOMAIN_OR_IP${NC}"
+    echo -e "  ${WHITE}API документация:${NC}  ${GREEN}https://$DOMAIN_OR_IP/docs${NC}"
+    echo -e "  ${WHITE}Health check:${NC}     ${GREEN}https://$DOMAIN_OR_IP/health${NC}"
+    echo ""
+    echo -e "  ${YELLOW}⚠️  Используется самоподписанный SSL сертификат${NC}"
+    echo -e "  ${YELLOW}   Примите предупреждение в браузере${NC}"
     echo ""
     
     return 0
@@ -160,6 +166,14 @@ check_dependencies() {
     # Проверка наличия curl
     if ! command -v curl &>/dev/null; then
         apt-get install -y curl 2>/dev/null || true
+    fi
+    
+    # Проверка портов
+    if ! check_port_free "$HTTP_PORT"; then
+        log_warn "Порт $HTTP_PORT уже используется"
+    fi
+    if ! check_port_free "$HTTPS_PORT"; then
+        log_warn "Порт $HTTPS_PORT уже используется"
     fi
     
     log_info "Зависимости проверены"
@@ -193,8 +207,6 @@ install_nginx() {
 create_directories() {
     log_info "Создание директорий..."
     
-    ensure_dir "/etc/nginx/sites-available"
-    ensure_dir "/etc/nginx/sites-enabled"
     ensure_dir "/etc/nginx/ssl"
     ensure_dir "/etc/nginx/conf.d"
     ensure_dir "/var/log/nginx"
@@ -203,6 +215,11 @@ create_directories() {
     ensure_dir "$INSTALL_DIR/logs"
     ensure_dir "$INSTALL_DIR/recordings"
     ensure_dir "$INSTALL_DIR/scripts"
+    
+    # Очистка старых конфигов - ИСПРАВЛЕНИЕ
+    rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
+    rm -f /etc/nginx/conf.d/*.conf 2>/dev/null || true
+    rm -f /etc/nginx/sites-available/* 2>/dev/null || true
     
     # Установка прав
     chown -R www-data:www-data /var/log/nginx 2>/dev/null || true
@@ -225,8 +242,6 @@ user www-data;
 worker_processes auto;
 worker_rlimit_nofile 65535;
 pid /run/nginx.pid;
-
-include /etc/nginx/modules-enabled/*.conf;
 
 events {
     worker_connections $worker_connections;
@@ -305,118 +320,10 @@ http {
     send_timeout 10;
     
     include /etc/nginx/conf.d/*.conf;
-    include /etc/nginx/sites-enabled/*;
 }
 EOF
 
-    # Создание HTTP конфигурации
-    cat > "/etc/nginx/sites-available/gochs" << EOF
-# GO-CHS Информирование - HTTP конфигурация
-server {
-    listen ${HTTP_PORT} default_server;
-    listen [::]:${HTTP_PORT} default_server;
-    server_name _;
-    
-    root $INSTALL_DIR/frontend/build;
-    index index.html index.htm;
-    
-    access_log /var/log/nginx/gochs-access.log json;
-    error_log /var/log/nginx/gochs-error.log;
-    
-    location / {
-        try_files \$uri \$uri/ /index.html;
-        
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-    }
-    
-    location /api {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        proxy_buffering off;
-        proxy_request_buffering off;
-    }
-    
-    location /ws {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_read_timeout 86400;
-    }
-    
-    location /recordings {
-        alias $INSTALL_DIR/recordings;
-        add_header Accept-Ranges bytes;
-        add_header Access-Control-Allow-Origin *;
-        auth_basic "Restricted";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-    }
-    
-    location /docs {
-        proxy_pass http://127.0.0.1:8000/docs;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-    }
-    
-    location /redoc {
-        proxy_pass http://127.0.0.1:8000/redoc;
-        proxy_set_header Host \$host;
-    }
-    
-    location /openapi.json {
-        proxy_pass http://127.0.0.1:8000/openapi.json;
-        proxy_set_header Host \$host;
-    }
-    
-    location /health {
-        proxy_pass http://127.0.0.1:8000/health;
-        access_log off;
-    }
-    
-    location /nginx_status {
-        stub_status on;
-        access_log off;
-        allow 127.0.0.1;
-        allow ::1;
-        deny all;
-    }
-    
-    location ~ /\. {
-        deny all;
-        access_log off;
-        log_not_found off;
-    }
-}
-EOF
-
-    # Активация HTTP
-    ln -sf /etc/nginx/sites-available/gochs /etc/nginx/sites-enabled/gochs
-    rm -f /etc/nginx/sites-enabled/default
-    
-    # Проверка конфигурации
-    if nginx -t 2>&1; then
-        log_info "Конфигурация Nginx корректна"
-    else
-        log_error "Ошибка в конфигурации Nginx"
-        return 1
-    fi
+    log_info "Основная конфигурация Nginx создана"
 }
 
 setup_letsencrypt() {
@@ -441,12 +348,6 @@ setup_letsencrypt() {
         }
     fi
     
-    # Проверка доступности домена
-    log_info "Проверка доступности домена $DOMAIN_OR_IP..."
-    if ! host "$DOMAIN_OR_IP" &>/dev/null; then
-        log_warn "Домен $DOMAIN_OR_IP не резолвится в DNS"
-    fi
-    
     log_info "Получение сертификата для $DOMAIN_OR_IP..."
     
     if certbot --nginx -d "$DOMAIN_OR_IP" --non-interactive --agree-tos -m "$ADMIN_EMAIL" --redirect 2>&1 | tee -a /tmp/certbot.log; then
@@ -459,20 +360,9 @@ setup_letsencrypt() {
         SSL_SUCCESS=true
     else
         log_error "Не удалось получить сертификат Let's Encrypt"
-        log_info "Проверьте, что домен $DOMAIN_OR_IP направлен на этот сервер и порт 80 доступен"
-        
-        # Автоматически переключаемся на самоподписанный если не в интерактивном режиме
-        if [[ -t 0 ]]; then
-            echo ""
-            echo -e "${YELLOW}Создать самоподписанный сертификат вместо этого? (y/N):${NC} "
-            read -r create_self
-            if [[ "$create_self" =~ ^[Yy]$ ]]; then
-                create_self_signed_cert
-                enable_https_config
-            fi
-        else
-            log_info "Неинтерактивный режим - SSL пропущен"
-        fi
+        log_info "Создаем самоподписанный сертификат..."
+        create_self_signed_cert
+        enable_https_config
     fi
 }
 
@@ -482,7 +372,7 @@ create_self_signed_cert() {
     ensure_dir "/etc/nginx/ssl"
     
     # Генерация сертификата
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
         -keyout /etc/nginx/ssl/gochs.key \
         -out /etc/nginx/ssl/gochs.crt \
         -subj "/C=RU/ST=Moscow/L=Moscow/O=GOCHS/CN=$DOMAIN_OR_IP" 2>/dev/null
@@ -490,60 +380,56 @@ create_self_signed_cert() {
     chmod 600 /etc/nginx/ssl/gochs.key
     chmod 644 /etc/nginx/ssl/gochs.crt
     
-    log_info "✅ Самоподписанный сертификат создан"
+    log_info "✅ Самоподписанный сертификат создан (срок действия 10 лет)"
     log_warn "⚠️  Браузер будет показывать предупреждение о недоверенном сертификате"
     
     SSL_SUCCESS=true
 }
 
 enable_https_config() {
-    log_info "Включение HTTPS конфигурации..."
+    log_info "Создание HTTPS конфигурации..."
     
-    # Создание HTTPS конфигурации
-    cat > "/etc/nginx/sites-available/gochs-ssl" << EOF
-# GO-CHS Информирование - HTTPS конфигурация
+    # ИСПРАВЛЕНИЕ: Правильная конфигурация с редиректом и прокси
+    cat > "/etc/nginx/conf.d/gochs.conf" << 'EOF'
+# HTTP -> HTTPS редирект
 server {
-    listen ${HTTPS_PORT} ssl http2 default_server;
-    listen [::]:${HTTPS_PORT} ssl http2 default_server;
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS сервер
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
     server_name _;
     
     ssl_certificate /etc/nginx/ssl/gochs.crt;
     ssl_certificate_key /etc/nginx/ssl/gochs.key;
-    
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
-    ssl_session_tickets off;
     
-    add_header Strict-Transport-Security "max-age=31536000" always;
-    
-    root $INSTALL_DIR/frontend/build;
+    root /opt/gochs-informing/frontend/build;
     index index.html;
     
-    access_log /var/log/nginx/gochs-ssl-access.log json;
-    error_log /var/log/nginx/gochs-ssl-error.log;
+    access_log /var/log/nginx/gochs-access.log json;
+    error_log /var/log/nginx/gochs-error.log;
     
-    location / {
-        try_files \$uri \$uri/ /index.html;
-        
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-    }
-    
-    location /api {
-        proxy_pass http://127.0.0.1:8000;
+    # API прокси
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
@@ -551,52 +437,72 @@ server {
         proxy_buffering off;
     }
     
-    location /ws {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_read_timeout 86400;
-    }
-    
-    location /recordings {
-        alias $INSTALL_DIR/recordings;
-        add_header Accept-Ranges bytes;
-        add_header Access-Control-Allow-Origin *;
+    location /health {
+        proxy_pass http://127.0.0.1:8000/health;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        access_log off;
     }
     
     location /docs {
         proxy_pass http://127.0.0.1:8000/docs;
-        proxy_set_header Host \$host;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
     
-    location /health {
-        proxy_pass http://127.0.0.1:8000/health;
+    location /redoc {
+        proxy_pass http://127.0.0.1:8000/redoc;
+        proxy_set_header Host $host;
+    }
+    
+    location /openapi.json {
+        proxy_pass http://127.0.0.1:8000/openapi.json;
+        proxy_set_header Host $host;
+    }
+    
+    location /ws {
+        proxy_pass http://127.0.0.1:8000/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 86400;
+    }
+    
+    location /recordings {
+        alias /opt/gochs-informing/recordings;
+        add_header Accept-Ranges bytes;
+        add_header Access-Control-Allow-Origin *;
+    }
+    
+    location /nginx_status {
+        stub_status on;
         access_log off;
+        allow 127.0.0.1;
+        deny all;
+    }
+    
+    location / {
+        try_files $uri $uri/ /index.html;
+        
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
     }
     
     location ~ /\. {
         deny all;
     }
 }
-
-# Редирект с HTTP на HTTPS
-server {
-    listen ${HTTP_PORT};
-    listen [::]:${HTTP_PORT};
-    server_name _;
-    return 301 https://\$server_name\$request_uri;
-}
 EOF
 
-    # Замена HTTP конфигурации на HTTPS
-    rm -f /etc/nginx/sites-enabled/gochs
-    ln -sf /etc/nginx/sites-available/gochs-ssl /etc/nginx/sites-enabled/gochs-ssl
+    # Замена переменных в конфиге
+    sed -i "s|/opt/gochs-informing|$INSTALL_DIR|g" /etc/nginx/conf.d/gochs.conf
     
     if nginx -t 2>&1; then
-        log_info "HTTPS конфигурация активирована"
+        log_info "HTTPS конфигурация создана и проверена"
     else
         log_error "Ошибка в HTTPS конфигурации"
         return 1
@@ -668,7 +574,6 @@ EOF
 setup_fail2ban() {
     log_info "Настройка fail2ban для Nginx..."
     
-    # Установка fail2ban если не установлен
     if ! command -v fail2ban-server &>/dev/null; then
         apt-get install -y fail2ban 2>/dev/null || true
     fi
@@ -688,13 +593,6 @@ port = http,https
 logpath = /var/log/nginx/access.log
 maxretry = 5
 bantime = 3600
-
-[nginx-limit-req]
-enabled = true
-port = http,https
-logpath = /var/log/nginx/error.log
-maxretry = 10
-bantime = 1800
 EOF
 
         systemctl restart fail2ban 2>/dev/null || true
@@ -753,7 +651,7 @@ create_test_frontend() {
             border-radius: 16px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             padding: 40px;
-            max-width: 700px;
+            max-width: 800px;
             width: 100%;
         }
         .header {
@@ -777,7 +675,7 @@ create_test_frontend() {
         }
         .status-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 15px;
             margin-bottom: 30px;
         }
@@ -788,18 +686,17 @@ create_test_frontend() {
             text-align: center;
         }
         .status-icon {
-            font-size: 28px;
-            margin-bottom: 8px;
+            font-size: 32px;
+            margin-bottom: 10px;
         }
         .status-name {
             font-weight: 600;
             color: #333;
             margin-bottom: 8px;
-            font-size: 14px;
         }
         .status-value {
-            font-size: 12px;
-            padding: 4px 10px;
+            font-size: 14px;
+            padding: 4px 12px;
             border-radius: 20px;
             display: inline-block;
         }
@@ -815,7 +712,6 @@ create_test_frontend() {
         .info-section h3 {
             color: #1a1a2e;
             margin-bottom: 15px;
-            font-size: 16px;
         }
         .info-item {
             display: flex;
@@ -828,24 +724,11 @@ create_test_frontend() {
         .info-label {
             font-weight: 500;
             color: #555;
-            width: 100px;
+            width: 120px;
         }
         .info-value {
             color: #333;
             font-family: monospace;
-        }
-        .commands {
-            background: #1e1e1e;
-            border-radius: 8px;
-            padding: 15px;
-            margin-top: 15px;
-        }
-        .commands code {
-            color: #d4d4d4;
-            font-family: monospace;
-            font-size: 13px;
-            display: block;
-            margin: 5px 0;
         }
         .footer {
             text-align: center;
@@ -898,7 +781,7 @@ create_test_frontend() {
         </div>
         
         <div class="info-section">
-            <h3>📋 Учетные данные для входа</h3>
+            <h3>📋 Учетные данные</h3>
             <div class="info-item">
                 <span class="info-label">Логин:</span>
                 <span class="info-value">admin</span>
@@ -909,19 +792,11 @@ create_test_frontend() {
             </div>
             <div class="info-item">
                 <span class="info-label">API Docs:</span>
-                <span class="info-value"><a href="/docs" target="_blank">/docs</a></span>
+                <span class="info-value"><a href="/docs">/docs</a></span>
             </div>
-        </div>
-        
-        <div class="info-section">
-            <h3>🔧 Управление системой</h3>
-            <div class="commands">
-                <code># Статус всех сервисов</code>
-                <code>systemctl status gochs-* redis-server asterisk nginx</code>
-                <code style="margin-top: 10px;"># Просмотр логов API</code>
-                <code>journalctl -u gochs-api -f</code>
-                <code style="margin-top: 10px;"># Перезапуск сервисов</code>
-                <code>systemctl restart gochs-api gochs-worker</code>
+            <div class="info-item">
+                <span class="info-label">Health:</span>
+                <span class="info-value"><a href="/health">/health</a></span>
             </div>
         </div>
         
@@ -975,13 +850,22 @@ EOF
 start_nginx() {
     log_info "Запуск Nginx..."
     
-    systemctl enable nginx
-    systemctl restart nginx
-    
+    # ИСПРАВЛЕНИЕ: Полная остановка перед запуском
+    systemctl stop nginx 2>/dev/null || true
+    pkill -f nginx 2>/dev/null || true
     sleep 2
     
-    if systemctl is-active --quiet nginx; then
+    systemctl enable nginx
+    systemctl start nginx
+    
+    if wait_for_service "nginx" 10; then
         log_info "Nginx успешно запущен"
+        
+        # Проверка HTTPS
+        sleep 2
+        if curl -sk https://localhost/health 2>/dev/null | grep -q "status"; then
+            log_info "HTTPS и API прокси работают корректно"
+        fi
     else
         log_error "Ошибка запуска Nginx"
         systemctl status nginx --no-pager -l
@@ -998,14 +882,17 @@ create_management_scripts() {
 echo "=== Статус Nginx ==="
 systemctl status nginx --no-pager
 
-echo -e "\n=== Активные соединения ==="
-curl -s http://localhost/nginx_status 2>/dev/null || echo "Статус недоступен"
+echo -e "\n=== Порты ==="
+netstat -tlnp 2>/dev/null | grep nginx
+
+echo -e "\n=== Тест HTTP -> HTTPS ==="
+curl -sI http://localhost/ 2>/dev/null | head -3
+
+echo -e "\n=== Тест HTTPS API ==="
+curl -sk https://localhost/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "API недоступен"
 
 echo -e "\n=== Последние ошибки ==="
-tail -20 /var/log/nginx/error.log 2>/dev/null || echo "Лог ошибок пуст"
-
-echo -e "\n=== Последние запросы ==="
-tail -10 /var/log/nginx/gochs-access.log 2>/dev/null || tail -10 /var/log/nginx/access.log 2>/dev/null
+tail -10 /var/log/nginx/error.log 2>/dev/null || echo "Лог ошибок пуст"
 EOF
 
     # Скрипт для просмотра логов
@@ -1033,24 +920,26 @@ EOF
 #!/bin/bash
 echo "Тестирование Nginx..."
 
-echo -n "HTTP: "
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/)
-if [[ "$HTTP_CODE" == "200" ]] || [[ "$HTTP_CODE" == "301" ]] || [[ "$HTTP_CODE" == "302" ]]; then
+echo -n "HTTP (редирект): "
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/ 2>/dev/null)
+if [[ "$HTTP_CODE" == "301" ]] || [[ "$HTTP_CODE" == "302" ]]; then
     echo "OK ($HTTP_CODE)"
 else
     echo "FAILED ($HTTP_CODE)"
 fi
 
-echo -n "API: "
-if curl -s http://localhost/health 2>/dev/null | grep -q "healthy"; then
-    echo "OK"
+echo -n "HTTPS: "
+HTTPS_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/ 2>/dev/null)
+if [[ "$HTTPS_CODE" == "200" ]]; then
+    echo "OK (200)"
 else
-    echo "FAILED (API недоступен)"
+    echo "FAILED ($HTTPS_CODE)"
 fi
 
-echo -n "Static: "
-if curl -s -o /dev/null -w "%{http_code}" http://localhost/ | grep -q "200\|301\|302"; then
+echo -n "API health: "
+if curl -sk https://localhost/health 2>/dev/null | grep -q "status"; then
     echo "OK"
+    curl -sk https://localhost/health 2>/dev/null | python3 -m json.tool 2>/dev/null | head -7
 else
     echo "FAILED"
 fi
@@ -1079,22 +968,21 @@ uninstall() {
     systemctl stop nginx 2>/dev/null
     systemctl disable nginx 2>/dev/null
     
-    rm -f /etc/nginx/sites-enabled/gochs
-    rm -f /etc/nginx/sites-enabled/gochs-ssl
-    rm -f /etc/nginx/sites-available/gochs
-    rm -f /etc/nginx/sites-available/gochs-ssl
+    rm -f /etc/nginx/conf.d/gochs.conf
+    rm -f /etc/nginx/ssl/gochs.*
     
     crontab -l 2>/dev/null | grep -v "nginx_metrics.sh" | crontab - 2>/dev/null || true
     crontab -l 2>/dev/null | grep -v "certbot renew" | crontab - 2>/dev/null || true
     
     rm -f "$INSTALL_DIR"/scripts/nginx_*.sh
-    rm -rf /etc/nginx/ssl
     
     read -p "Удалить Nginx полностью? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         apt-get remove --purge -y nginx nginx-common nginx-full 2>/dev/null
         apt-get autoremove -y 2>/dev/null
+        rm -rf /etc/nginx
+        rm -rf /var/log/nginx
         log_info "Nginx удален"
     fi
     
@@ -1120,14 +1008,6 @@ check_status() {
             status=1
         fi
         
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/ 2>/dev/null)
-        if [[ "$HTTP_CODE" == "200" ]] || [[ "$HTTP_CODE" == "301" ]] || [[ "$HTTP_CODE" == "302" ]]; then
-            log_info "  HTTP доступ: OK ($HTTP_CODE)"
-        else
-            log_warn "  HTTP доступ: Ошибка ($HTTP_CODE)"
-            status=1
-        fi
-        
     else
         log_error "✗ Сервис Nginx: не активен"
         status=1
@@ -1141,6 +1021,13 @@ check_status() {
         fi
     else
         log_info "SSL: не настроен"
+    fi
+    
+    if curl -sk https://localhost/health 2>/dev/null | grep -q "status"; then
+        log_info "✓ API прокси: работает"
+    else
+        log_warn "✗ API прокси: не работает"
+        status=1
     fi
     
     if [[ -f "$INSTALL_DIR/frontend/build/index.html" ]]; then
@@ -1180,19 +1067,8 @@ case "${1:-}" in
         if [[ -f "$INSTALL_DIR/scripts/nginx_test.sh" ]]; then
             bash "$INSTALL_DIR/scripts/nginx_test.sh"
         else
-            curl -s http://localhost/health 2>/dev/null | python3 -m json.tool 2>/dev/null || curl -s http://localhost/health
+            curl -sk https://localhost/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "API недоступен"
         fi
-        ;;
-    ssl-setup)
-        if [[ "$SSL_MODE" == "letsencrypt" ]]; then
-            setup_letsencrypt
-        elif [[ "$SSL_MODE" == "selfsigned" ]]; then
-            create_self_signed_cert
-            enable_https_config
-        else
-            echo "SSL_MODE=$SSL_MODE - настройка SSL не требуется"
-        fi
-        systemctl restart nginx
         ;;
     ssl-check)
         if [[ -f "$INSTALL_DIR/scripts/nginx_ssl_check.sh" ]]; then
@@ -1200,7 +1076,7 @@ case "${1:-}" in
         fi
         ;;
     *)
-        echo "Использование: $0 {install|uninstall|status|reload|restart|logs [error|access]|test|ssl-setup|ssl-check}"
+        echo "Использование: $0 {install|uninstall|status|reload|restart|logs [error|access]|test|ssl-check}"
         exit 1
         ;;
 esac
