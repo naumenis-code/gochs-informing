@@ -179,40 +179,93 @@ get_user_input() {
     local default_ip=$(detect_ip)
     
     echo ""
-    echo -e "${CYAN}Введите параметры установки:${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}                    ВВЕДИТЕ ПАРАМЕТРЫ УСТАНОВКИ${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
     # Домен или IP
-    read -p "Домен или IP-адрес сервера [$default_ip]: " input_ip
+    echo -e "${GREEN}▶ СЕТЕВЫЕ НАСТРОЙКИ${NC}"
+    echo -e "  Укажите домен или IP-адрес, по которому будет доступна система."
+    echo -e "  ${YELLOW}По умолчанию: ${default_ip}${NC}"
+    echo ""
+    read -p "  Домен или IP-адрес сервера [$default_ip]: " input_ip
     DOMAIN_OR_IP="${input_ip:-$default_ip}"
+    echo -e "  ${GREEN}✓${NC} Используется: ${DOMAIN_OR_IP}"
+    echo ""
     
     # Email администратора
-    read -p "Email администратора [admin@localhost]: " input_email
+    echo -e "${GREEN}▶ КОНТАКТНЫЕ ДАННЫЕ${NC}"
+    echo -e "  Укажите email администратора для уведомлений."
+    echo -e "  ${YELLOW}По умолчанию: admin@localhost${NC}"
+    echo ""
+    read -p "  Email администратора [admin@localhost]: " input_email
     ADMIN_EMAIL="${input_email:-admin@localhost}"
+    echo -e "  ${GREEN}✓${NC} Используется: ${ADMIN_EMAIL}"
+    echo ""
     
     # FreePBX настройки
+    echo -e "${GREEN}▶ НАСТРОЙКИ ПОДКЛЮЧЕНИЯ К FreePBX${NC}"
+    echo -e "  Укажите параметры для регистрации Asterisk на сервере FreePBX."
     echo ""
-    echo -e "${CYAN}Настройки подключения к FreePBX:${NC}"
-    read -p "IP адрес FreePBX [192.168.1.10]: " freepbx_host
+    
+    read -p "  IP адрес FreePBX [192.168.1.10]: " freepbx_host
     FREEPBX_HOST="${freepbx_host:-192.168.1.10}"
     
-    read -p "Порт FreePBX [5060]: " freepbx_port
+    read -p "  Порт FreePBX [5060]: " freepbx_port
     FREEPBX_PORT="${freepbx_port:-5060}"
     
-    read -p "Внутренний номер/Extension [gochs]: " freepbx_ext
+    read -p "  Внутренний номер/Extension [gochs]: " freepbx_ext
     FREEPBX_EXTENSION="${freepbx_ext:-gochs}"
     
-    read -p "Пароль для регистрации: " freepbx_pass
+    echo -e "  ${YELLOW}Введите пароль для регистрации на FreePBX${NC}"
+    read -s -p "  Пароль: " freepbx_pass
+    echo ""
     while [[ -z "$freepbx_pass" ]]; do
-        read -p "Пароль не может быть пустым. Введите пароль: " freepbx_pass
+        echo -e "  ${RED}Пароль не может быть пустым!${NC}"
+        read -s -p "  Пароль: " freepbx_pass
+        echo ""
     done
     FREEPBX_PASSWORD="$freepbx_pass"
+    FREEPBX_USERNAME="$FREEPBX_EXTENSION"
     
-    # Генерация паролей для БД и Redis
-    POSTGRES_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
-    REDIS_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
-    ASTERISK_AMI_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
-    ASTERISK_ARI_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
+    echo ""
+    echo -e "${GREEN}▶ ПАРОЛИ ДЛЯ СЛУЖЕБНЫХ КОМПОНЕНТОВ${NC}"
+    echo -e "  Будут автоматически сгенерированы безопасные пароли для:"
+    echo -e "  • Базы данных PostgreSQL"
+    echo -e "  • Redis"
+    echo -e "  • Asterisk AMI/ARI"
+    echo ""
+    
+    # Генерация паролей
+    POSTGRES_PASSWORD=$(generate_password)
+    REDIS_PASSWORD=$(generate_password)
+    ASTERISK_AMI_PASSWORD=$(generate_password)
+    ASTERISK_ARI_PASSWORD=$(generate_password)
+    ASTERISK_ADMIN_PASSWORD=$(generate_password)
+    ASTERISK_MONITOR_PASSWORD=$(generate_password)
+    
+    echo -e "  ${GREEN}✓${NC} Пароли сгенерированы"
+    echo ""
+    
+    # Подтверждение
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}                    ПРОВЕРЬТЕ ВВЕДЕННЫЕ ДАННЫЕ${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${WHITE}Сетевой адрес:${NC}     ${GREEN}$DOMAIN_OR_IP${NC}"
+    echo -e "  ${WHITE}Email админа:${NC}     ${GREEN}$ADMIN_EMAIL${NC}"
+    echo -e "  ${WHITE}FreePBX хост:${NC}     ${GREEN}$FREEPBX_HOST:$FREEPBX_PORT${NC}"
+    echo -e "  ${WHITE}FreePBX номер:${NC}    ${GREEN}$FREEPBX_EXTENSION${NC}"
+    echo ""
+    
+    read -p "  Всё верно? Начинаем установку? (Y/n): " confirm
+    if [[ "$confirm" =~ ^[Nn]$ ]]; then
+        log_warn "Установка отменена пользователем"
+        exit 0
+    fi
+    
+    echo ""
     
     # Создание конфигурационного файла
     generate_config
@@ -220,7 +273,6 @@ get_user_input() {
     # Сохранение учетных данных
     save_credentials
     
-    echo ""
     log_info "Конфигурация сохранена"
 }
 
