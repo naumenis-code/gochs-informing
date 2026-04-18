@@ -1,0 +1,40 @@
+; =====================================================
+; ПРИМЕР ПОЛЬЗОВАТЕЛЬСКИХ НАСТРОЕК ВХОДЯЩИХ ЗВОНКОВ
+; Переименуйте в inbound-custom.conf для активации
+; =====================================================
+
+[gochs-inbound-custom]
+; =====================================================
+; КАСТОМНЫЕ МАРШРУТЫ ВХОДЯЩИХ ЗВОНКОВ
+; =====================================================
+
+; Маршрут для VIP номеров
+exten => _X.,1,NoOp(VIP обработка)
+ same => n,GotoIf($[${CALLER_NUM} = 89161234567]?vip)
+ same => n,Goto(gochs-inbound-main,${EXTEN},1)
+ same => n(vip),Set(PRIORITY=vip)
+ same => n,Goto(gochs-inbound-main,${EXTEN},1)
+
+; Специальная обработка для определенных отделов
+exten => 101,1,NoOp(Отдел безопасности)
+ same => n,Set(DEPARTMENT=security)
+ same => n,Goto(gochs-inbound-main,${EXTEN},1)
+
+; Игнорирование автоинформаторов
+exten => _X.,1,NoOp(Проверка на робота)
+ same => n,Answer()
+ same => n,Wait(0.5)
+ same => n,SendDTMF(1,250,250)
+ same => n,WaitForSilence(2000,1)
+ same => n,GotoIf($[${WAITSILENCE} = 1]?robot)
+ same => n,Goto(gochs-inbound-main,${EXTEN},1)
+ same => n(robot),Hangup()
+
+; Переадресация в определенные часы
+exten => _X.,1,NoOp(Проверка переадресации)
+ same => n,GotoIfTime(09:00-18:00,mon-fri,*,*?office-hours)
+ same => n,Set(FORWARD_NUMBER=${AFTER_HOURS_NUMBER})
+ same => n,Goto(forward)
+ same => n(office-hours),Set(FORWARD_NUMBER=${OFFICE_HOURS_NUMBER})
+ same => n(forward),Dial(PJSIP/${FORWARD_NUMBER}@freepbx-endpoint,30)
+ same => n,Hangup()
