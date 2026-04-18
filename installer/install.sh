@@ -3,7 +3,7 @@
 ################################################################################
 # ГО-ЧС Информирование - Главный установочный скрипт
 # Модульная установка системы с улучшенной обработкой ошибок
-# Версия: 1.0.3
+# Версия: 1.0.5 (полная исправленная версия)
 ################################################################################
 
 set -e
@@ -21,7 +21,7 @@ if [[ -f "${UTILS_DIR}/common.sh" ]]; then
 fi
 
 # Версия системы
-VERSION="1.0.3"
+VERSION="1.0.5"
 
 # Цвета для вывода
 RED='\033[0;31m'
@@ -231,14 +231,14 @@ get_user_input() {
     echo -e "    • Для IP-адреса - вариант 2 или 3"
     echo -e "    • Для домена - вариант 1"
     echo ""
-    read -p "  ▶ Ваш выбор (1-3) [3]: " ssl_choice
-    SSL_CHOICE="${ssl_choice:-3}"
+    read -p "  ▶ Ваш выбор (1-3) [2]: " ssl_choice
+    SSL_CHOICE="${ssl_choice:-2}"
     
     case "$SSL_CHOICE" in
         1) SSL_MODE="letsencrypt" ;;
         2) SSL_MODE="selfsigned" ;;
         3) SSL_MODE="none" ;;
-        *) SSL_MODE="none" ;;
+        *) SSL_MODE="selfsigned" ;;
     esac
     
     case "$SSL_MODE" in
@@ -267,15 +267,16 @@ get_user_input() {
     # Порт FreePBX
     echo -e "  ${WHITE}2) Порт SIP (PJSIP)${NC}"
     echo -e "     ${CYAN}Стандартный порт для SIP протокола — 5060.${NC}"
+    echo -e "     ${CYAN}Если у вас другой порт — укажите его.${NC}"
     echo -e "     ${YELLOW}По умолчанию: 5060${NC}"
     read -p "     ▶ Порт FreePBX [5060]: " freepbx_port
     FREEPBX_PORT="${freepbx_port:-5060}"
     echo -e "     ${GREEN}✓${NC} Порт: ${FREEPBX_PORT}"
     echo ""
     
-    # Extension
+    # Extension (внутренний номер)
     echo -e "  ${WHITE}3) Внутренний номер (Extension)${NC}"
-    echo -e "     ${CYAN}Это номер, под которым система будет регистрироваться.${NC}"
+    echo -e "     ${CYAN}Это номер, под которым система будет регистрироваться на FreePBX.${NC}"
     echo -e "     ${CYAN}Создайте отдельный Extension в FreePBX для системы ГО-ЧС.${NC}"
     echo -e "     ${YELLOW}По умолчанию: gochs${NC}"
     read -p "     ▶ Extension/Номер [gochs]: " freepbx_ext
@@ -284,7 +285,7 @@ get_user_input() {
     echo -e "     ${GREEN}✓${NC} Extension: ${FREEPBX_EXTENSION}"
     echo ""
     
-    # Пароль
+    # Пароль для регистрации
     echo -e "  ${WHITE}4) Пароль (Secret)${NC}"
     echo -e "     ${CYAN}Пароль, указанный в настройках Extension в FreePBX.${NC}"
     echo -e "     ${CYAN}Это поле 'Secret' в настройках PJSIP расширения.${NC}"
@@ -494,14 +495,50 @@ install_module() {
     
     log_step "Установка модуля: $module"
     
-    if bash "$module_script" "install" 2>&1 | tee -a "$LOG_FILE"; then
-        log_info "Модуль $module успешно установлен"
-        echo "$module:$(date +%s)" >> "$INSTALL_DIR/.modules_state"
-        return 0
-    else
-        log_error "Ошибка при установке модуля $module"
-        return 1
+    # Попытка установки с повторными попытками
+    local max_attempts=3
+    local attempt=1
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        log_info "Попытка $attempt из $max_attempts..."
+        
+        if bash "$module_script" "install" 2>&1 | tee -a "$LOG_FILE"; then
+            log_info "Модуль $module успешно установлен"
+            echo "$module:$(date +%s)" >> "$INSTALL_DIR/.modules_state"
+            return 0
+        else
+            log_warn "Ошибка при установке модуля $module (попытка $attempt)"
+            
+            if [[ $attempt -lt $max_attempts ]]; then
+                log_info "Ожидание перед повторной попыткой..."
+                sleep 5
+                
+                # Очистка перед повторной попыткой
+                bash "$module_script" "clean" 2>/dev/null || true
+            fi
+            
+            ((attempt++))
+        fi
+    done
+    
+    log_error "Модуль $module не удалось установить после $max_attempts попыток"
+    return 1
+}
+
+post_install_fixes() {
+    log_info "Применение финальных настроек..."
+    
+    # Пароль Redis в API
+    local redis_pass=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
+    if [[ -n "$redis_pass" ]] && [[ -f "$INSTALL_DIR/app/main.py" ]]; then
+        sed -i "s/REDIS_PASSWORD = .*/REDIS_PASSWORD = \"$redis_pass\"/" "$INSTALL_DIR/app/main.py" 2>/dev/null || true
     fi
+    
+    # Перезапуск сервисов
+    systemctl restart gochs-api gochs-worker gochs-scheduler 2>/dev/null || true
+    systemctl restart nginx 2>/dev/null || true
+    
+    log_info "Финальные настройки применены"
 }
 
 full_install() {
@@ -525,16 +562,19 @@ full_install() {
     for module in "${modules[@]}"; do
         if ! install_module "$module"; then
             failed_modules="$failed_modules $module"
-            log_error "Модуль $module не установлен"
+            log_error "КРИТИЧЕСКАЯ ОШИБКА: модуль $module не установлен"
             
             echo -n "Продолжить установку? (y/N): "
             read -r response
             if [[ ! "$response" =~ ^[Yy]$ ]]; then
-                log_error "Установка прервана"
+                log_error "Установка прервана пользователем"
                 exit 1
             fi
         fi
     done
+    
+    # Постустановочные исправления
+    post_install_fixes
     
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
@@ -546,7 +586,7 @@ full_install() {
     log_info "Время установки: ${minutes} мин ${seconds} сек"
     
     if [[ -n "$failed_modules" ]]; then
-        log_warn "Не установлены модули:$failed_modules"
+        log_warn "Следующие модули не были установлены:$failed_modules"
     else
         log_info "✅ Все модули установлены успешно!"
     fi
@@ -585,11 +625,20 @@ show_post_install_info() {
     echo "  Логин: admin"
     echo "  Пароль: Admin123!"
     echo ""
+    
+    if [[ "$SSL_MODE" == "selfsigned" ]]; then
+        echo -e "${YELLOW}⚠️  Используется самоподписанный SSL сертификат.${NC}"
+        echo -e "${YELLOW}   Браузер покажет предупреждение - это нормально.${NC}"
+        echo ""
+    fi
+    
     echo "═══════════════════════════════════════════════════════════════"
 }
 
 pre_install_check() {
     log_step "ПРОВЕРКА СИСТЕМЫ ПЕРЕД УСТАНОВКОЙ"
+    
+    local errors=0
     
     echo ""
     echo "► Проверка прав root..."
@@ -597,6 +646,7 @@ pre_install_check() {
         echo "  ✓ OK"
     else
         echo "  ✗ Требуются права root"
+        ((errors++))
     fi
     
     echo "► Проверка ОС..."
@@ -604,6 +654,7 @@ pre_install_check() {
         echo "  ✓ Debian $(cat /etc/debian_version 2>/dev/null)"
     else
         echo "  ✗ Требуется Debian/Ubuntu"
+        ((errors++))
     fi
     
     echo "► Проверка ресурсов..."
@@ -623,7 +674,11 @@ pre_install_check() {
     df -h /opt 2>/dev/null | tail -1 | awk '{print "  " $4 " свободно"}'
     
     echo ""
-    log_info "✅ Система готова к установке"
+    if [[ $errors -eq 0 ]]; then
+        log_info "✅ Система готова к установке"
+    else
+        log_warn "⚠ Обнаружены проблемы, установка может не выполниться"
+    fi
 }
 
 show_modules_status() {
@@ -691,8 +746,42 @@ view_logs() {
         4) tail -f /var/log/nginx/error.log 2>/dev/null || echo "Логи Nginx не найдены" ;;
         5) tail -f "$LOG_FILE" ;;
         6) return ;;
-        *) echo -e "${RED}Неверный выбор${NC}" ;;
+        *) echo "Неверный выбор" ;;
     esac
+}
+
+selective_install() {
+    echo ""
+    echo -e "${CYAN}Доступные модули:${NC}"
+    echo -e "  ${GREEN}1${NC}. system    - Системные зависимости"
+    echo -e "  ${GREEN}2${NC}. python    - Python окружение"
+    echo -e "  ${GREEN}3${NC}. db        - PostgreSQL"
+    echo -e "  ${GREEN}4${NC}. redis     - Redis"
+    echo -e "  ${GREEN}5${NC}. asterisk  - Asterisk"
+    echo -e "  ${GREEN}6${NC}. backend   - FastAPI Backend"
+    echo -e "  ${GREEN}7${NC}. frontend  - React Frontend"
+    echo -e "  ${GREEN}8${NC}. nginx     - Nginx"
+    echo ""
+    read -p "  ▶ Введите номера модулей через пробел: " modules
+    
+    declare -A module_map=(
+        [1]="01-system"
+        [2]="02-python"
+        [3]="03-db"
+        [4]="04-redis"
+        [5]="05-asterisk"
+        [6]="06-backend"
+        [7]="07-frontend"
+        [8]="08-nginx"
+    )
+    
+    for num in $modules; do
+        if [[ -n "${module_map[$num]}" ]]; then
+            install_module "${module_map[$num]}"
+        fi
+    done
+    
+    post_install_fixes
 }
 
 show_banner() {
@@ -759,35 +848,7 @@ main() {
                 ;;
             2)
                 get_user_input
-                echo ""
-                echo -e "${CYAN}Доступные модули:${NC}"
-                echo -e "  ${GREEN}1${NC}. system    - Системные зависимости"
-                echo -e "  ${GREEN}2${NC}. python    - Python окружение"
-                echo -e "  ${GREEN}3${NC}. db        - PostgreSQL"
-                echo -e "  ${GREEN}4${NC}. redis     - Redis"
-                echo -e "  ${GREEN}5${NC}. asterisk  - Asterisk"
-                echo -e "  ${GREEN}6${NC}. backend   - FastAPI Backend"
-                echo -e "  ${GREEN}7${NC}. frontend  - React Frontend"
-                echo -e "  ${GREEN}8${NC}. nginx     - Nginx"
-                echo ""
-                read -p "  ▶ Введите номера модулей через пробел: " modules
-                
-                declare -A module_map=(
-                    [1]="01-system"
-                    [2]="02-python"
-                    [3]="03-db"
-                    [4]="04-redis"
-                    [5]="05-asterisk"
-                    [6]="06-backend"
-                    [7]="07-frontend"
-                    [8]="08-nginx"
-                )
-                
-                for num in $modules; do
-                    if [[ -n "${module_map[$num]}" ]]; then
-                        install_module "${module_map[$num]}"
-                    fi
-                done
+                selective_install
                 ;;
             3)
                 pre_install_check
