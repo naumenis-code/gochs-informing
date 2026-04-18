@@ -1,0 +1,37 @@
+; =====================================================
+; ПРИМЕР ПОЛЬЗОВАТЕЛЬСКИХ НАСТРОЕК ИСХОДЯЩИХ ЗВОНКОВ
+; =====================================================
+
+[gochs-outbound-custom]
+; =====================================================
+; СПЕЦИАЛЬНЫЕ МАРШРУТЫ
+; =====================================================
+
+; VIP номера с повышенным приоритетом
+exten => _X.,1,NoOp(VIP маршрут)
+ same => n,GotoIf($[${DESTINATION} = 79161234567]?vip)
+ same => n,GotoIf($[${DESTINATION} = 79169876543]?vip)
+ same => n,Goto(gochs-outbound-main,${EXTEN},1)
+ same => n(vip),Set(PRIORITY=1)
+ same => n,Set(TIMEOUT_DIAL=60)
+ same => n,Goto(gochs-outbound-main,${EXTEN},1)
+
+; Черный список (запрет звонков)
+exten => _X.,1,NoOp(Проверка черного списка)
+ same => n,Set(BLACKLISTED=${SHELL(grep -c "^${DESTINATION}$" ${GOCHS_BASE}/config/outbound_blacklist.txt)})
+ same => n,GotoIf($[${BLACKLISTED} > 0]?blocked)
+ same => n,Goto(gochs-outbound-main,${EXTEN},1)
+ same => n(blocked),NoOp(Номер заблокирован)
+ same => n,UserEvent(CallBlocked,Destination: ${DESTINATION})
+ same => n,Hangup(21)
+
+; Ограничение по времени суток
+exten => _X.,1,NoOp(Проверка времени)
+ same => n,GotoIfTime(23:00-07:00,*,*,*?night-restriction)
+ same => n,Goto(gochs-outbound-main,${EXTEN},1)
+ same => n(night-restriction),NoOp(Ночное ограничение)
+ same => n,GotoIf($[${PRIORITY} <= 3]?allow)
+ same => n,UserEvent(CallRestricted,Destination: ${DESTINATION},Reason: night-time)
+ same => n,Congestion(10)
+ same => n,Hangup()
+ same => n(allow),Goto(gochs-outbound-main,${EXTEN},1)
