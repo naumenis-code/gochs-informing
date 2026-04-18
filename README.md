@@ -16,23 +16,23 @@
 ├── playbooks/          # Приветствия для входящих звонков
 ├── logs/               # Логи приложения
 ├── backups/            # Резервные копии БД и конфигураций
-├── installer/          # Скрипты для установки (install.sh)
-    ├── install.sh           # Главный управляющий скрипт
-    ├── modules/
-│   ├── 01-system.sh     # Системные зависимости
-│   ├── 02-python.sh     # Python окружение
-│   ├── 03-db.sh         # PostgreSQL
-│   ├── 04-redis.sh      # Redis
-│   ├── 05-asterisk.sh   # Asterisk
-│   ├── 06-backend.sh    # FastAPI Backend
-│   ├── 07-frontend.sh   # React Frontend
-│   └── 08-nginx.sh      # Nginx
-├── config/
-│   ├── config.env       # Общие настройки
-│   └── asterisk/        # Конфиги Asterisk
-└── utils/
-    ├── common.sh        # Общие функции
-    └── validators.sh    # Функции проверки
+├ installer/
+│    ├── install.sh           # Главный управляющий скрипт
+│    ├── modules/
+│    │   ├── 01-system.sh     # Системные зависимости
+│    │   ├── 02-python.sh     # Python окружение
+│    │   ├── 03-db.sh         # PostgreSQL
+│    │   ├── 04-redis.sh      # Redis
+│    │   ├── 05-asterisk.sh   # Asterisk
+│    │   ├── 06-backend.sh    # FastAPI Backend
+│    │   ├── 07-frontend.sh   # React Frontend
+│    │   └── 08-nginx.sh      # Nginx
+│    ├── config/
+│    │   ├── config.env       # Общие настройки
+│    │   └── asterisk/        # Конфиги Asterisk
+│    └── utils/
+│        ├── common.sh        # Общие функции
+│        └── validators.sh    # Функции проверки
 └── exports/            # Файлы для импорта/экспорта данных
 ```
 🔒 Безопасность и отказоустойчивость
