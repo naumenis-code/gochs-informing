@@ -85,7 +85,7 @@ cryptography==41.0.7
 
 # Asterisk Integration
 # ------------------------------------------------------------------------------
-pyst2==0.8.0
+pyst2==0.5.1
 py-asterisk==0.1.6
 panoramisk==1.4.1
 aioari==0.3.2
