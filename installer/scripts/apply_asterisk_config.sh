@@ -46,4 +46,27 @@ for file in "$CONFIG_SRC"/*.conf; do
         apply_template "$file" "${CONFIG_DST}/${filename}"
         echo "Применен шаблон: $filename"
     else
-        cp "$file" "${CONFIG_DST}/${filename
+        cp "$file" "${CONFIG_DST}/${filename}"
+        echo "Скопирован: $filename"
+    fi
+done
+
+# Копирование поддиректорий
+if [[ -d "${CONFIG_SRC}/gochs" ]]; then
+    mkdir -p "${CONFIG_DST}/gochs"
+    cp -r "${CONFIG_SRC}/gochs/"* "${CONFIG_DST}/gochs/"
+    echo "Скопирована директория: gochs"
+fi
+
+# Установка прав
+chown -R asterisk:asterisk "$CONFIG_DST"
+chmod 640 "${CONFIG_DST}"/*.conf
+
+# Перезагрузка Asterisk
+echo "Перезагрузка конфигурации Asterisk..."
+asterisk -rx "core reload"
+asterisk -rx "pjsip reload"
+asterisk -rx "dialplan reload"
+asterisk -rx "manager reload"
+
+echo "Конфигурация Asterisk применена!"
