@@ -5,7 +5,13 @@
 # Назначение: Настройка Python окружения и установка зависимостей
 ################################################################################
 
-source "${UTILS_DIR}/utils/common.sh"
+# Определение путей
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Загрузка общих функций
+if [[ -f "${SCRIPT_DIR}/utils/common.sh" ]]; then
+    source "${SCRIPT_DIR}/utils/common.sh"
+fi
 
 MODULE_NAME="02-python"
 MODULE_DESCRIPTION="Python окружение и зависимости"
