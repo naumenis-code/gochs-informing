@@ -5,7 +5,13 @@
 # Назначение: Установка и настройка PostgreSQL
 ################################################################################
 
-source "${UTILS_DIR}/utils/common.sh"
+# Определение путей
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Загрузка общих функций
+if [[ -f "${SCRIPT_DIR}/utils/common.sh" ]]; then
+    source "${SCRIPT_DIR}/utils/common.sh"
+fi
 
 MODULE_NAME="03-db"
 MODULE_DESCRIPTION="PostgreSQL база данных"
