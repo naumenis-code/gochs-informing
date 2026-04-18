@@ -5,7 +5,7 @@
 # Назначение: Настройка Python окружения и установка зависимостей
 ################################################################################
 
-source "${UTILS_DIR}/common.sh"
+source "${UTILS_DIR}/utils/common.sh"
 
 MODULE_NAME="02-python"
 MODULE_DESCRIPTION="Python окружение и зависимости"
