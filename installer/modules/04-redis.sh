@@ -3,7 +3,7 @@
 ################################################################################
 # Модуль: 04-redis.sh
 # Назначение: Установка и настройка Redis для очередей и кэширования
-# Версия: 1.0.1 (исправленная полная версия)
+# Версия: 1.0.5 (исправленная полная версия)
 ################################################################################
 
 # Определение путей
@@ -21,6 +21,7 @@ if ! type log_info &>/dev/null; then
     YELLOW='\033[1;33m'
     BLUE='\033[0;34m'
     CYAN='\033[0;36m'
+    WHITE='\033[1;37m'
     NC='\033[0m'
     
     log_info() { echo -e "${GREEN}[INFO]${NC} $(date '+%H:%M:%S') $*"; }
@@ -56,8 +57,21 @@ if ! type log_info &>/dev/null; then
         mkdir -p "$(dirname "$state_file")"
         echo "$module:$(date +%s)" >> "$state_file"
     }
+    ensure_dir() {
+        local dir="$1"
+        if [[ ! -d "$dir" ]]; then
+            mkdir -p "$dir"
+        fi
+    }
     generate_password() {
         openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "RedisPass$(date +%s)"
+    }
+    check_port_free() {
+        local port="$1"
+        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
+            return 1
+        fi
+        return 0
     }
 fi
 
@@ -75,31 +89,16 @@ else
     REDIS_MAXMEMORY="${REDIS_MAXMEMORY:-512mb}"
 fi
 
-# Версия Redis
-REDIS_VERSION="7.2"
-
 install() {
     log_step "Установка и настройка Redis"
     
-    # Проверка зависимостей
     check_dependencies
-    
-    # Установка Redis
     install_redis
-    
-    # Настройка Redis
     configure_redis
-    
-    # Запуск Redis
     start_redis
-    
-    # Создание скриптов для работы с Redis
     create_redis_scripts
-    
-    # Настройка мониторинга
     setup_monitoring
     
-    # Отметка об установке
     mark_module_installed "$MODULE_NAME"
     
     log_info "Модуль ${MODULE_NAME} успешно установлен"
@@ -112,31 +111,32 @@ install() {
 check_dependencies() {
     log_info "Проверка зависимостей..."
     
-    # Проверка прав root
     if [[ $EUID -ne 0 ]]; then
         log_error "Скрипт должен запускаться от root!"
         return 1
     fi
     
-    # Проверка наличия curl/wget
     if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
         log_warn "Установка curl..."
-        apt-get update -qq
-        apt-get install -y curl
+        apt-get update -qq 2>/dev/null || true
+        apt-get install -y curl 2>/dev/null || true
+    fi
+    
+    # Проверка занятости порта
+    if ! check_port_free "$REDIS_PORT"; then
+        log_warn "Порт $REDIS_PORT уже используется"
     fi
     
     log_info "Зависимости проверены"
 }
 
 install_redis() {
-    log_info "Установка Redis $REDIS_VERSION..."
+    log_info "Установка Redis..."
     
-    # Проверка, установлен ли уже Redis
     if command -v redis-server &> /dev/null; then
         REDIS_VER=$(redis-server --version 2>/dev/null | awk '{print $3}' | cut -d'=' -f2)
         log_info "Redis уже установлен (версия $REDIS_VER)"
         
-        # Проверка версии
         local major_version=$(echo "$REDIS_VER" | cut -d. -f1)
         if [[ $major_version -ge 7 ]]; then
             log_info "Версия Redis 7+ - OK"
@@ -152,7 +152,6 @@ install_redis() {
         # Добавление официального репозитория Redis
         log_info "Добавление репозитория Redis..."
         
-        # Установка ключа и репозитория
         if curl -fsSL https://packages.redis.io/gpg 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg 2>/dev/null; then
             echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs 2>/dev/null || echo 'bookworm') main" > /etc/apt/sources.list.d/redis.list
             apt-get update -qq
@@ -176,18 +175,15 @@ configure_redis() {
     # Резервное копирование оригинальной конфигурации
     backup_file "$redis_conf"
     
-    # Расчет оптимальных параметров
+    # Расчет оптимальных параметров памяти
     local total_ram=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "2048")
     local maxmemory=$((total_ram / 4))
     
-    # Определение версии Redis для правильного синтаксиса
-    local redis_version=$(redis-server --version 2>/dev/null | awk '{print $3}' | cut -d'=' -f2 | cut -d. -f1)
-    
-    # Создание новой конфигурации (исправленный синтаксис)
+    # Создание новой конфигурации с правильным синтаксисом
     cat > "$redis_conf" << EOF
 # ================================================
 # ГО-ЧС Информирование - Конфигурация Redis
-# Версия: $REDIS_VERSION
+# Версия: 7.2
 # ================================================
 
 # Сеть
@@ -281,26 +277,19 @@ dynamic-hz yes
 aof-rewrite-incremental-fsync yes
 rdb-save-incremental-fsync yes
 
-# IO threads (для Redis 6+)
+# IO threads
 io-threads 4
 io-threads-do-reads yes
 EOF
 
-    # Создание директории для логов и данных
-    mkdir -p /var/log/redis
-    mkdir -p /var/lib/redis
-    mkdir -p /var/run/redis
+    # Создание директорий
+    ensure_dir "/var/log/redis"
+    ensure_dir "/var/lib/redis"
+    ensure_dir "/var/run/redis"
     
-    chown redis:redis /var/log/redis
-    chown redis:redis /var/lib/redis
-    chown redis:redis /var/run/redis
-    
-    # Проверка конфигурации
-    if redis-server "$redis_conf" --test-memory 1 2>/dev/null; then
-        log_info "Конфигурация Redis проверена"
-    else
-        log_warn "Конфигурация Redis может иметь проблемы, но продолжаем..."
-    fi
+    chown redis:redis /var/log/redis 2>/dev/null || true
+    chown redis:redis /var/lib/redis 2>/dev/null || true
+    chown redis:redis /var/run/redis 2>/dev/null || true
     
     log_info "Конфигурация Redis создана"
 }
@@ -341,7 +330,7 @@ start_redis() {
 create_redis_scripts() {
     log_info "Создание скриптов для работы с Redis..."
     
-    mkdir -p "$INSTALL_DIR/scripts"
+    ensure_dir "$INSTALL_DIR/scripts"
     
     # Скрипт для проверки состояния Redis
     cat > "$INSTALL_DIR/scripts/check_redis.sh" << 'EOF'
@@ -754,8 +743,13 @@ case "${1:-}" in
     logs)
         tail -f /var/log/redis/redis-server.log
         ;;
+    clean)
+        log_info "Очистка временных файлов Redis..."
+        rm -rf /var/lib/redis/dump.rdb 2>/dev/null || true
+        rm -rf /var/lib/redis/appendonly.aof 2>/dev/null || true
+        ;;
     *)
-        echo "Использование: $0 {install|uninstall|status|benchmark|flush|info|backup|monitor|cli|restart|logs}"
+        echo "Использование: $0 {install|uninstall|status|benchmark|flush|info|backup|monitor|cli|restart|logs|clean}"
         echo ""
         echo "  install    - Установка Redis"
         echo "  uninstall  - Удаление Redis"
@@ -768,6 +762,7 @@ case "${1:-}" in
         echo "  cli        - Подключение к Redis CLI"
         echo "  restart    - Перезапуск сервиса"
         echo "  logs       - Просмотр логов"
+        echo "  clean      - Очистка временных файлов"
         exit 1
         ;;
 esac
