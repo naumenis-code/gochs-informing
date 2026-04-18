@@ -709,15 +709,15 @@ restart_services() {
 # Просмотр логов
 view_logs() {
     echo ""
-    echo "Выберите лог для просмотра:"
-    echo "  1. API (gochs-api)"
-    echo "  2. Worker (gochs-worker)"
-    echo "  3. Asterisk"
-    echo "  4. Nginx error"
-    echo "  5. Установка"
-    echo "  6. Назад"
+    echo -e "${CYAN}Выберите лог для просмотра:${NC}"
+    echo -e "  ${GREEN}1${NC}. API (gochs-api)"
+    echo -e "  ${GREEN}2${NC}. Worker (gochs-worker)"
+    echo -e "  ${GREEN}3${NC}. Asterisk"
+    echo -e "  ${GREEN}4${NC}. Nginx error"
+    echo -e "  ${GREEN}5${NC}. Установка"
+    echo -e "  ${GREEN}6${NC}. Назад"
     echo ""
-    read -p "Выбор (1-6): " log_choice
+    read -p "  ▶ Выбор (1-6): " log_choice
     
     case $log_choice in
         1) journalctl -u gochs-api -f ;;
@@ -726,7 +726,7 @@ view_logs() {
         4) tail -f /var/log/nginx/error.log 2>/dev/null || echo "Логи Nginx не найдены" ;;
         5) tail -f "$LOG_FILE" ;;
         6) return ;;
-        *) echo "Неверный выбор" ;;
+        *) echo -e "${RED}Неверный выбор${NC}" ;;
     esac
 }
 
@@ -736,27 +736,27 @@ view_logs() {
 
 show_banner() {
     clear
-    echo -e "${BLUE}"
+    echo -e "${GREEN}"
     echo "╔═══════════════════════════════════════════════════════════════╗"
     echo "║                                                               ║"
     echo "║      _____   ____       _____  _____         _____            ║"
     echo "║     / ____| / __ \\     / ____|/ ____|       |_   _|          ║"
-    echo "║    | |  __ | |  | |   | |     | (___          | |             ║"
-    echo "║    | | |_ || |  | |   | |      \\___ \\         | |           ║"
-    echo "║    | |__| || |__| |   | |____  ____) |       _| |_            ║"
-    echo "║     \\_____| \\____/     \\_____||_____/       |_____|        ║"
+    echo "║    | |  __ | |  | |   | |     | (___          | |            ║"
+    echo "║    | | |_ || |  | |   | |      \\___ \\         | |            ║"
+    echo "║    | |__| || |__| |   | |____  ____) |       _| |_           ║"
+    echo "║     \\_____| \\____/     \\_____||_____/       |_____|          ║"
     echo "║                                                               ║"
     echo "║    ____                  __ _           _                     ║"
-    echo "║   / __ \\                / _(_)         | |                   ║"
+    echo "║   / __ \\                / _(_)         | |                    ║"
     echo "║  | |  | |_ __   ___ _ _| |_ _ _ __   __| | ___ _ __           ║"
-    echo "║  | |  | | '_ \\ / _ \\ '_ \\  _| | '_ \\ / _\\ |/ _ \\ '__|   ║"
+    echo "║  | |  | | '_ \\ / _ \\ '_ \\  _| | '_ \\ / _\` |/ _ \\ '__|          ║"
     echo "║  | |__| | |_) |  __/ | | | | | | | | (_| |  __/ |             ║"
-    echo "║   \\____/| .__/ \\___|_| |_|_| |_| |_|\\__,_|\\___|_|         ║"
+    echo "║   \\____/| .__/ \\___|_| |_|_| |_| |_|\\__,_|\\___|_|             ║"
     echo "║         | |                                                   ║"
     echo "║         |_|                                                   ║"
     echo "║                                                               ║"
     echo "║         Система ГО-ЧС информирования и оповещения             ║"
-    echo "║                    Версия ${VERSION}                          ║"
+    echo "║                    Версия ${VERSION}                               ║"
     echo "╚═══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -767,15 +767,30 @@ show_menu() {
     echo -e "${CYAN}                        ГЛАВНОЕ МЕНЮ${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo "  ${GREEN}1${NC}. Полная установка (все модули)"
-    echo "  ${GREEN}2${NC}. Выборочная установка модулей"
-    echo "  ${GREEN}3${NC}. Проверить систему перед установкой"
-    echo "  ${GREEN}4${NC}. Показать статус установленных модулей"
-    echo "  ${GREEN}5${NC}. Перезапустить сервисы"
-    echo "  ${GREEN}6${NC}. Просмотреть логи"
-    echo "  ${GREEN}7${NC}. Выход"
+    echo -e "  ${GREEN}1${NC}. Полная установка (все модули)"
+    echo -e "  ${GREEN}2${NC}. Выборочная установка модулей"
+    echo -e "  ${GREEN}3${NC}. Проверить систему перед установкой"
+    echo -e "  ${GREEN}4${NC}. Показать статус установленных модулей"
+    echo -e "  ${GREEN}5${NC}. Перезапустить сервисы"
+    echo -e "  ${GREEN}6${NC}. Просмотреть логи"
+    echo -e "  ${GREEN}7${NC}. Выход"
     echo ""
     read -p "  ▶ Ваш выбор (1-7): " choice
+}
+
+selective_install_menu() {
+    echo ""
+    echo -e "${CYAN}Доступные модули:${NC}"
+    echo -e "  ${GREEN}1${NC}. system    - Системные зависимости"
+    echo -e "  ${GREEN}2${NC}. python    - Python окружение"
+    echo -e "  ${GREEN}3${NC}. db        - PostgreSQL"
+    echo -e "  ${GREEN}4${NC}. redis     - Redis"
+    echo -e "  ${GREEN}5${NC}. asterisk  - Asterisk"
+    echo -e "  ${GREEN}6${NC}. backend   - FastAPI Backend"
+    echo -e "  ${GREEN}7${NC}. frontend  - React Frontend"
+    echo -e "  ${GREEN}8${NC}. nginx     - Nginx"
+    echo ""
+    read -p "  ▶ Введите номера модулей через пробел: " modules
 }
 
 ################################################################################
