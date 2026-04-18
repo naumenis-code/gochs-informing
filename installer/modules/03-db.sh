@@ -5,7 +5,7 @@
 # Назначение: Установка и настройка PostgreSQL
 ################################################################################
 
-source "${UTILS_DIR}/common.sh"
+source "${UTILS_DIR}/utils/common.sh"
 
 MODULE_NAME="03-db"
 MODULE_DESCRIPTION="PostgreSQL база данных"
