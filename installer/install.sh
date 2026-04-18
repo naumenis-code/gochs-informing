@@ -3,10 +3,10 @@
 ################################################################################
 # ГО-ЧС Информирование - Главный установочный скрипт
 # Модульная установка системы с улучшенной обработкой ошибок
-# Версия: 1.0.2
+# Версия: 1.0.3
 ################################################################################
 
-set -e  # Прерывать при ошибке, но с обработкой
+set -e
 
 # Определение директорий
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,13 +15,13 @@ CONFIG_DIR="${SCRIPT_DIR}/config"
 UTILS_DIR="${SCRIPT_DIR}/utils"
 INSTALL_DIR="/opt/gochs-informing"
 
-# Загрузка общих функций (если есть)
+# Загрузка общих функций
 if [[ -f "${UTILS_DIR}/common.sh" ]]; then
     source "${UTILS_DIR}/common.sh"
 fi
 
 # Версия системы
-VERSION="1.0.2"
+VERSION="1.0.3"
 
 # Цвета для вывода
 RED='\033[0;31m'
@@ -40,14 +40,6 @@ touch "$LOG_FILE" 2>/dev/null || true
 ################################################################################
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 ################################################################################
-
-log() {
-    local level="$1"
-    shift
-    local message="$*"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${timestamp} [${level}] ${message}" | tee -a "$LOG_FILE" 2>/dev/null || echo -e "${message}"
-}
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $(date '+%H:%M:%S') $*" | tee -a "$LOG_FILE" 2>/dev/null
@@ -68,7 +60,6 @@ log_step() {
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}" | tee -a "$LOG_FILE" 2>/dev/null
 }
 
-# Генерация пароля
 generate_password() {
     local length="${1:-16}"
     if command -v openssl &>/dev/null; then
@@ -78,7 +69,6 @@ generate_password() {
     fi
 }
 
-# Определение IP
 detect_ip() {
     local ip=$(ip route get 1 2>/dev/null | awk '{print $NF;exit}')
     if [[ -n "$ip" ]] && [[ "$ip" != "127.0.0.1" ]]; then
@@ -93,7 +83,6 @@ detect_ip() {
     fi
 }
 
-# Создание директории
 ensure_dir() {
     local dir="$1"
     if [[ ! -d "$dir" ]]; then
@@ -102,25 +91,20 @@ ensure_dir() {
     fi
 }
 
-# Функция для проверки и установки базовых зависимостей
 ensure_basic_deps() {
     log_info "Проверка базовых зависимостей..."
     
-    # Проверка прав root
     if [[ $EUID -ne 0 ]]; then
         echo -e "${RED}ОШИБКА: Скрипт должен запускаться от root!${NC}"
         echo "Выполните: sudo bash install.sh"
         exit 1
     fi
     
-    # Проверка и установка lsb-release если отсутствует
     if ! command -v lsb_release &>/dev/null; then
-        log_warn "lsb-release не установлен. Устанавливаю..."
         apt-get update -qq 2>/dev/null || true
         apt-get install -y lsb-release 2>/dev/null || true
     fi
     
-    # Проверка ОС
     if [[ ! -f /etc/debian_version ]]; then
         log_error "Система не является Debian/Ubuntu!"
         exit 1
@@ -138,7 +122,6 @@ ensure_basic_deps() {
         log_info "ОС: Debian $os_version - OK"
     fi
     
-    # Установка минимально необходимых пакетов
     local required_pkgs="wget curl git build-essential net-tools"
     local missing_pkgs=""
     
@@ -157,7 +140,6 @@ ensure_basic_deps() {
     log_info "Базовые зависимости установлены"
 }
 
-# Функция для создания структуры директорий
 ensure_directories() {
     log_info "Создание структуры директорий..."
     
@@ -178,23 +160,19 @@ ensure_directories() {
     log_info "Директории созданы"
 }
 
-# Проверка интернета
 check_internet() {
     log_info "Проверка интернет-соединения..."
     
-    # Проверка DNS
     if ! nslookup google.com &>/dev/null && ! dig google.com &>/dev/null && ! host google.com &>/dev/null; then
-        log_warn "Проблемы с DNS разрешением"
         echo "nameserver 8.8.8.8" >> /etc/resolv.conf 2>/dev/null || true
         echo "nameserver 1.1.1.1" >> /etc/resolv.conf 2>/dev/null || true
     fi
     
-    # Проверка подключения
     if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
         log_info "Интернет доступен"
         return 0
     else
-        log_warn "Интернет недоступен. Некоторые компоненты могут не установиться."
+        log_warn "Интернет недоступен."
         echo -n "Продолжить установку в офлайн-режиме? (y/N): "
         read -r response
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
@@ -208,7 +186,6 @@ check_internet() {
 # ФУНКЦИИ КОНФИГУРАЦИИ
 ################################################################################
 
-# Получение параметров от пользователя
 get_user_input() {
     log_step "Начальная конфигурация"
     
@@ -241,6 +218,36 @@ get_user_input() {
     echo -e "  ${GREEN}✓${NC} Используется: ${ADMIN_EMAIL}"
     echo ""
     
+    # ========== НАСТРОЙКИ SSL ==========
+    echo -e "${GREEN}▶ НАСТРОЙКИ HTTPS (SSL)${NC}"
+    echo -e "  ${WHITE}Хотите настроить HTTPS для безопасного доступа?${NC}"
+    echo ""
+    echo -e "  ${CYAN}Варианты:${NC}"
+    echo -e "    ${GREEN}1${NC}. Да, получить бесплатный сертификат Let's Encrypt (если есть домен)"
+    echo -e "    ${GREEN}2${NC}. Да, создать самоподписанный сертификат (для тестирования)"
+    echo -e "    ${GREEN}3${NC}. Нет, использовать только HTTP (можно настроить позже)"
+    echo ""
+    echo -e "  ${YELLOW}Рекомендация:${NC}"
+    echo -e "    • Для IP-адреса - вариант 2 или 3"
+    echo -e "    • Для домена - вариант 1"
+    echo ""
+    read -p "  ▶ Ваш выбор (1-3) [3]: " ssl_choice
+    SSL_CHOICE="${ssl_choice:-3}"
+    
+    case "$SSL_CHOICE" in
+        1) SSL_MODE="letsencrypt" ;;
+        2) SSL_MODE="selfsigned" ;;
+        3) SSL_MODE="none" ;;
+        *) SSL_MODE="none" ;;
+    esac
+    
+    case "$SSL_MODE" in
+        "letsencrypt") echo -e "  ${GREEN}✓${NC} Будет получен сертификат Let's Encrypt" ;;
+        "selfsigned") echo -e "  ${GREEN}✓${NC} Будет создан самоподписанный сертификат" ;;
+        "none") echo -e "  ${GREEN}✓${NC} HTTPS не настраивается (только HTTP)" ;;
+    esac
+    echo ""
+    
     # ========== НАСТРОЙКИ FreePBX ==========
     echo -e "${GREEN}▶ НАСТРОЙКИ ПОДКЛЮЧЕНИЯ К FreePBX${NC}"
     echo -e "  ${WHITE}Для интеграции с существующей АТС укажите параметры FreePBX.${NC}"
@@ -260,16 +267,15 @@ get_user_input() {
     # Порт FreePBX
     echo -e "  ${WHITE}2) Порт SIP (PJSIP)${NC}"
     echo -e "     ${CYAN}Стандартный порт для SIP протокола — 5060.${NC}"
-    echo -e "     ${CYAN}Если у вас другой порт — укажите его.${NC}"
     echo -e "     ${YELLOW}По умолчанию: 5060${NC}"
     read -p "     ▶ Порт FreePBX [5060]: " freepbx_port
     FREEPBX_PORT="${freepbx_port:-5060}"
     echo -e "     ${GREEN}✓${NC} Порт: ${FREEPBX_PORT}"
     echo ""
     
-    # Extension (внутренний номер)
+    # Extension
     echo -e "  ${WHITE}3) Внутренний номер (Extension)${NC}"
-    echo -e "     ${CYAN}Это номер, под которым система будет регистрироваться на FreePBX.${NC}"
+    echo -e "     ${CYAN}Это номер, под которым система будет регистрироваться.${NC}"
     echo -e "     ${CYAN}Создайте отдельный Extension в FreePBX для системы ГО-ЧС.${NC}"
     echo -e "     ${YELLOW}По умолчанию: gochs${NC}"
     read -p "     ▶ Extension/Номер [gochs]: " freepbx_ext
@@ -278,7 +284,7 @@ get_user_input() {
     echo -e "     ${GREEN}✓${NC} Extension: ${FREEPBX_EXTENSION}"
     echo ""
     
-    # Пароль для регистрации
+    # Пароль
     echo -e "  ${WHITE}4) Пароль (Secret)${NC}"
     echo -e "     ${CYAN}Пароль, указанный в настройках Extension в FreePBX.${NC}"
     echo -e "     ${CYAN}Это поле 'Secret' в настройках PJSIP расширения.${NC}"
@@ -297,11 +303,7 @@ get_user_input() {
     
     # ========== ГЕНЕРАЦИЯ ПАРОЛЕЙ ==========
     echo -e "${GREEN}▶ СЛУЖЕБНЫЕ ПАРОЛИ${NC}"
-    echo -e "  ${WHITE}Будут автоматически сгенерированы безопасные пароли для:${NC}"
-    echo -e "  • Базы данных PostgreSQL"
-    echo -e "  • Redis"
-    echo -e "  • Asterisk AMI (интерфейс управления)"
-    echo -e "  • Asterisk ARI (REST API)"
+    echo -e "  ${WHITE}Будут автоматически сгенерированы безопасные пароли.${NC}"
     echo ""
     
     POSTGRES_PASSWORD=$(generate_password 16)
@@ -321,6 +323,7 @@ get_user_input() {
     echo ""
     echo -e "  ${WHITE}Сетевой адрес:${NC}     ${GREEN}$DOMAIN_OR_IP${NC}"
     echo -e "  ${WHITE}Email админа:${NC}     ${GREEN}$ADMIN_EMAIL${NC}"
+    echo -e "  ${WHITE}Режим SSL:${NC}        ${GREEN}$SSL_MODE${NC}"
     echo -e "  ${WHITE}FreePBX хост:${NC}     ${GREEN}$FREEPBX_HOST:$FREEPBX_PORT${NC}"
     echo -e "  ${WHITE}FreePBX номер:${NC}    ${GREEN}$FREEPBX_EXTENSION${NC}"
     echo ""
@@ -333,16 +336,12 @@ get_user_input() {
     
     echo ""
     
-    # Создание конфигурационного файла
     generate_config
-    
-    # Сохранение учетных данных
     save_credentials
     
     log_info "Конфигурация сохранена"
 }
 
-# Генерация конфигурационного файла
 generate_config() {
     local config_file="${CONFIG_DIR}/config.env"
     
@@ -365,6 +364,9 @@ DOMAIN_OR_IP="$DOMAIN_OR_IP"
 HTTP_PORT=80
 HTTPS_PORT=443
 API_PORT=8000
+
+# SSL
+SSL_MODE="$SSL_MODE"
 
 # База данных
 POSTGRES_VERSION="15"
@@ -414,7 +416,6 @@ EOF
     log_info "Конфигурация сохранена в $config_file"
 }
 
-# Сохранение учетных данных
 save_credentials() {
     local cred_file="/root/.gochs_credentials"
     
@@ -458,15 +459,18 @@ FREE PBX:
   Extension: $FREEPBX_EXTENSION
   Пароль: $FREEPBX_PASSWORD
 
+РЕЖИМ SSL:
+  $SSL_MODE
+
 ДИРЕКТОРИИ:
   Установка: $INSTALL_DIR
   Записи звонков: $INSTALL_DIR/recordings
   Логи: $INSTALL_DIR/logs
 
 УПРАВЛЕНИЕ СЕРВИСАМИ:
-  Статус всех сервисов: systemctl status gochs-* redis-server asterisk nginx
-  Просмотр логов API: journalctl -u gochs-api -f
-  Перезапуск API: systemctl restart gochs-api
+  Статус: systemctl status gochs-* redis-server asterisk nginx
+  Логи API: journalctl -u gochs-api -f
+  Перезапуск: systemctl restart gochs-api
 
 ═══════════════════════════════════════════════════════════════
 EOF
@@ -479,7 +483,6 @@ EOF
 # ФУНКЦИИ УСТАНОВКИ
 ################################################################################
 
-# Установка модуля с обработкой ошибок
 install_module() {
     local module="$1"
     local module_script="${MODULES_DIR}/${module}.sh"
@@ -491,43 +494,21 @@ install_module() {
     
     log_step "Установка модуля: $module"
     
-    # Попытка установки с повторными попытками
-    local max_attempts=3
-    local attempt=1
-    
-    while [[ $attempt -le $max_attempts ]]; do
-        log_info "Попытка $attempt из $max_attempts..."
-        
-        if bash "$module_script" "install" 2>&1 | tee -a "$LOG_FILE"; then
-            log_info "Модуль $module успешно установлен"
-            echo "$module:$(date +%s)" >> "$INSTALL_DIR/.modules_state"
-            return 0
-        else
-            log_warn "Ошибка при установке модуля $module (попытка $attempt)"
-            
-            if [[ $attempt -lt $max_attempts ]]; then
-                log_info "Ожидание перед повторной попыткой..."
-                sleep 5
-                
-                # Очистка перед повторной попыткой
-                bash "$module_script" "clean" 2>/dev/null || true
-            fi
-            
-            ((attempt++))
-        fi
-    done
-    
-    log_error "Модуль $module не удалось установить после $max_attempts попыток"
-    return 1
+    if bash "$module_script" "install" 2>&1 | tee -a "$LOG_FILE"; then
+        log_info "Модуль $module успешно установлен"
+        echo "$module:$(date +%s)" >> "$INSTALL_DIR/.modules_state"
+        return 0
+    else
+        log_error "Ошибка при установке модуля $module"
+        return 1
+    fi
 }
 
-# Полная установка
 full_install() {
     log_step "ЗАПУСК ПОЛНОЙ УСТАНОВКИ"
     
     local start_time=$(date +%s)
     
-    # Список модулей
     local modules=(
         "01-system"
         "02-python"
@@ -544,12 +525,12 @@ full_install() {
     for module in "${modules[@]}"; do
         if ! install_module "$module"; then
             failed_modules="$failed_modules $module"
-            log_error "КРИТИЧЕСКАЯ ОШИБКА: модуль $module не установлен"
+            log_error "Модуль $module не установлен"
             
             echo -n "Продолжить установку? (y/N): "
             read -r response
             if [[ ! "$response" =~ ^[Yy]$ ]]; then
-                log_error "Установка прервана пользователем"
+                log_error "Установка прервана"
                 exit 1
             fi
         fi
@@ -565,7 +546,7 @@ full_install() {
     log_info "Время установки: ${minutes} мин ${seconds} сек"
     
     if [[ -n "$failed_modules" ]]; then
-        log_warn "Следующие модули не были установлены:$failed_modules"
+        log_warn "Не установлены модули:$failed_modules"
     else
         log_info "✅ Все модули установлены успешно!"
     fi
@@ -573,7 +554,6 @@ full_install() {
     show_post_install_info
 }
 
-# Показать информацию после установки
 show_post_install_info() {
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
@@ -581,7 +561,6 @@ show_post_install_info() {
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
     
-    # Проверка статуса сервисов
     echo -e "${CYAN}Статус сервисов:${NC}"
     for service in postgresql redis-server asterisk gochs-api gochs-worker gochs-scheduler nginx; do
         if systemctl is-active --quiet $service 2>/dev/null; then
@@ -594,15 +573,13 @@ show_post_install_info() {
     echo ""
     echo -e "${CYAN}Доступ к системе:${NC}"
     echo "  Web интерфейс: http://$DOMAIN_OR_IP"
+    if [[ "$SSL_MODE" != "none" ]]; then
+        echo "  HTTPS: https://$DOMAIN_OR_IP"
+    fi
     echo "  API документация: http://$DOMAIN_OR_IP/docs"
     echo ""
     echo -e "${CYAN}Учетные данные:${NC}"
     echo "  Файл с паролями: /root/.gochs_credentials"
-    echo ""
-    echo -e "${CYAN}Управление:${NC}"
-    echo "  Просмотр логов API: journalctl -u gochs-api -f"
-    echo "  Перезапуск API: systemctl restart gochs-api"
-    echo "  Статус всех сервисов: systemctl status gochs-*"
     echo ""
     echo -e "${YELLOW}ВАЖНО: Измените пароль администратора при первом входе!${NC}"
     echo "  Логин: admin"
@@ -611,11 +588,8 @@ show_post_install_info() {
     echo "═══════════════════════════════════════════════════════════════"
 }
 
-# Проверка системы перед установкой
 pre_install_check() {
     log_step "ПРОВЕРКА СИСТЕМЫ ПЕРЕД УСТАНОВКОЙ"
-    
-    local errors=0
     
     echo ""
     echo "► Проверка прав root..."
@@ -623,22 +597,20 @@ pre_install_check() {
         echo "  ✓ OK"
     else
         echo "  ✗ Требуются права root"
-        ((errors++))
     fi
     
     echo "► Проверка ОС..."
     if [[ -f /etc/debian_version ]]; then
-        echo "  ✓ Debian $(cat /etc/debian_version 2>/dev/null || echo '')"
+        echo "  ✓ Debian $(cat /etc/debian_version 2>/dev/null)"
     else
         echo "  ✗ Требуется Debian/Ubuntu"
-        ((errors++))
     fi
     
     echo "► Проверка ресурсов..."
     cpu=$(nproc)
     ram=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}' || echo "?")
-    echo "  CPU: $cpu ядер $([ $cpu -ge 4 ] && echo '✓' || echo '⚠ (рекомендуется 4+)')"
-    echo "  RAM: ${ram}GB $([ $ram -ge 8 ] && echo '✓' || echo '⚠ (рекомендуется 8GB+)')"
+    echo "  CPU: $cpu ядер $([ $cpu -ge 4 ] && echo '✓' || echo '⚠')"
+    echo "  RAM: ${ram}GB $([ $ram -ge 8 ] && echo '✓' || echo '⚠')"
     
     echo "► Проверка сети..."
     if ping -c 1 -W 2 8.8.8.8 &>/dev/null; then
@@ -651,14 +623,9 @@ pre_install_check() {
     df -h /opt 2>/dev/null | tail -1 | awk '{print "  " $4 " свободно"}'
     
     echo ""
-    if [[ $errors -eq 0 ]]; then
-        log_info "✅ Система готова к установке"
-    else
-        log_warn "⚠ Обнаружены проблемы, установка может не выполниться"
-    fi
+    log_info "✅ Система готова к установке"
 }
 
-# Показать статус модулей
 show_modules_status() {
     log_step "СТАТУС УСТАНОВЛЕННЫХ МОДУЛЕЙ"
     
@@ -692,7 +659,6 @@ show_modules_status() {
     done
 }
 
-# Перезапуск сервисов
 restart_services() {
     log_step "ПЕРЕЗАПУСК СЕРВИСОВ"
     
@@ -706,7 +672,6 @@ restart_services() {
     log_info "Сервисы перезапущены"
 }
 
-# Просмотр логов
 view_logs() {
     echo ""
     echo -e "${CYAN}Выберите лог для просмотра:${NC}"
@@ -722,7 +687,7 @@ view_logs() {
     case $log_choice in
         1) journalctl -u gochs-api -f ;;
         2) journalctl -u gochs-worker -f ;;
-        3) tail -f /var/log/asterisk/messages 2>/dev/null || tail -f /var/log/asterisk/full 2>/dev/null || echo "Логи Asterisk не найдены" ;;
+        3) tail -f /var/log/asterisk/messages 2>/dev/null || echo "Логи Asterisk не найдены" ;;
         4) tail -f /var/log/nginx/error.log 2>/dev/null || echo "Логи Nginx не найдены" ;;
         5) tail -f "$LOG_FILE" ;;
         6) return ;;
@@ -730,13 +695,9 @@ view_logs() {
     esac
 }
 
-################################################################################
-# ГЛАВНОЕ МЕНЮ
-################################################################################
-
 show_banner() {
     clear
-    echo -e "${GREEN}"
+    echo -e "${BLUE}"
     echo "╔═══════════════════════════════════════════════════════════════╗"
     echo "║                                                               ║"
     echo "║      _____   ____       _____  _____         _____            ║"
@@ -778,31 +739,14 @@ show_menu() {
     read -p "  ▶ Ваш выбор (1-7): " choice
 }
 
-selective_install_menu() {
-    echo ""
-    echo -e "${CYAN}Доступные модули:${NC}"
-    echo -e "  ${GREEN}1${NC}. system    - Системные зависимости"
-    echo -e "  ${GREEN}2${NC}. python    - Python окружение"
-    echo -e "  ${GREEN}3${NC}. db        - PostgreSQL"
-    echo -e "  ${GREEN}4${NC}. redis     - Redis"
-    echo -e "  ${GREEN}5${NC}. asterisk  - Asterisk"
-    echo -e "  ${GREEN}6${NC}. backend   - FastAPI Backend"
-    echo -e "  ${GREEN}7${NC}. frontend  - React Frontend"
-    echo -e "  ${GREEN}8${NC}. nginx     - Nginx"
-    echo ""
-    read -p "  ▶ Введите номера модулей через пробел: " modules
-}
-
 ################################################################################
 # ГЛАВНАЯ ФУНКЦИЯ
 ################################################################################
 
 main() {
-    # Инициализация
     ensure_basic_deps
     ensure_directories
     
-    # Основной цикл
     while true; do
         show_banner
         show_menu
@@ -816,17 +760,17 @@ main() {
             2)
                 get_user_input
                 echo ""
-                echo "Доступные модули:"
-                echo "  1. system    - Системные зависимости"
-                echo "  2. python    - Python окружение"
-                echo "  3. db        - PostgreSQL"
-                echo "  4. redis     - Redis"
-                echo "  5. asterisk  - Asterisk"
-                echo "  6. backend   - FastAPI Backend"
-                echo "  7. frontend  - React Frontend"
-                echo "  8. nginx     - Nginx"
+                echo -e "${CYAN}Доступные модули:${NC}"
+                echo -e "  ${GREEN}1${NC}. system    - Системные зависимости"
+                echo -e "  ${GREEN}2${NC}. python    - Python окружение"
+                echo -e "  ${GREEN}3${NC}. db        - PostgreSQL"
+                echo -e "  ${GREEN}4${NC}. redis     - Redis"
+                echo -e "  ${GREEN}5${NC}. asterisk  - Asterisk"
+                echo -e "  ${GREEN}6${NC}. backend   - FastAPI Backend"
+                echo -e "  ${GREEN}7${NC}. frontend  - React Frontend"
+                echo -e "  ${GREEN}8${NC}. nginx     - Nginx"
                 echo ""
-                read -p "Введите номера модулей через пробел: " modules
+                read -p "  ▶ Введите номера модулей через пробел: " modules
                 
                 declare -A module_map=(
                     [1]="01-system"
@@ -871,5 +815,4 @@ main() {
     done
 }
 
-# Запуск
 main "$@"
