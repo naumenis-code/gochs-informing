@@ -5,10 +5,13 @@
 # Назначение: Установка системных зависимостей и подготовка ОС
 ################################################################################
 
-source "${UTILS_DIR}/common.sh"
+# Определение путей
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-MODULE_NAME="01-system"
-MODULE_DESCRIPTION="Системные зависимости и подготовка ОС"
+# Загрузка общих функций
+if [[ -f "${SCRIPT_DIR}/utils/common.sh" ]]; then
+    source "${SCRIPT_DIR}/utils/common.sh"
+fi
 
 install() {
     log_step "Установка системных зависимостей"
