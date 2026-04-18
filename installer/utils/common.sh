@@ -2,7 +2,7 @@
 
 ################################################################################
 # ГО-ЧС Информирование - Общие функции для модулей установки
-# Версия: 1.0.1 (исправленная полная версия)
+# Версия: 1.0.5 (полная исправленная версия)
 ################################################################################
 
 # Запрет на выполнение напрямую
@@ -21,7 +21,7 @@ export BLUE='\033[0;34m'
 export PURPLE='\033[0;35m'
 export CYAN='\033[0;36m'
 export WHITE='\033[1;37m'
-export NC='\033[0m' # No Color
+export NC='\033[0m'
 
 # ============================================================================
 # ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -31,19 +31,21 @@ export GOCHS_USER="${GOCHS_USER:-gochs}"
 export GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 export LOG_FILE="${LOG_FILE:-${INSTALL_DIR}/install.log}"
 export MODULES_STATE_FILE="${INSTALL_DIR}/.modules_state"
+export CONFIG_DIR="${SCRIPT_DIR:-/opt/gochs-informing/installer}/config"
+
+# ============================================================================
+# ИНИЦИАЛИЗАЦИЯ ЛОГИРОВАНИЯ
+# ============================================================================
+
+init_logging() {
+    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+    touch "$LOG_FILE" 2>/dev/null || true
+}
 
 # ============================================================================
 # ФУНКЦИИ ЛОГИРОВАНИЯ
 # ============================================================================
 
-# Инициализация логирования
-init_logging() {
-    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
-    touch "$LOG_FILE" 2>/dev/null || true
-    exec 2> >(tee -a "$LOG_FILE" >&2) 2>/dev/null || true
-}
-
-# Основные функции логирования
 log_info() {
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo -e "${GREEN}[INFO]${NC} ${timestamp} - $*" | tee -a "$LOG_FILE" 2>/dev/null || echo -e "${GREEN}[INFO]${NC} $*"
@@ -61,12 +63,12 @@ log_error() {
 
 log_success() {
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${GREEN}✓${NC} $*" | tee -a "$LOG_FILE" 2>/dev/null || echo "✓ $*"
+    echo -e "${GREEN}✓${NC} ${timestamp} - $*" | tee -a "$LOG_FILE" 2>/dev/null || echo "✓ $*"
 }
 
 log_fail() {
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${RED}✗${NC} $*" | tee -a "$LOG_FILE" 2>/dev/null || echo "✗ $*"
+    echo -e "${RED}✗${NC} ${timestamp} - $*" | tee -a "$LOG_FILE" 2>/dev/null || echo "✗ $*"
 }
 
 log_step() {
@@ -84,10 +86,9 @@ log_debug() {
 }
 
 # ============================================================================
-# ФУНКЦИИ РАБОТЫ С ФАЙЛАМИ
+# ФУНКЦИИ РАБОТЫ С ФАЙЛАМИ И ДИРЕКТОРИЯМИ
 # ============================================================================
 
-# Резервное копирование файла
 backup_file() {
     local file="$1"
     if [[ -f "$file" ]]; then
@@ -101,7 +102,6 @@ backup_file() {
     fi
 }
 
-# Восстановление из резервной копии
 restore_backup() {
     local backup_file="$1"
     local original_file="${backup_file%.backup.*}"
@@ -116,7 +116,6 @@ restore_backup() {
     fi
 }
 
-# Создание директории с проверкой
 ensure_dir() {
     local dir="$1"
     local owner="${2:-root}"
@@ -135,7 +134,6 @@ ensure_dir() {
 # ФУНКЦИИ ПРОВЕРКИ СИСТЕМЫ
 # ============================================================================
 
-# Проверка прав root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "Этот скрипт должен запускаться от root!"
@@ -145,7 +143,6 @@ check_root() {
     return 0
 }
 
-# Проверка операционной системы
 check_os() {
     if [[ ! -f /etc/debian_version ]]; then
         log_error "Система не является Debian/Ubuntu!"
@@ -166,7 +163,6 @@ check_os() {
     return 0
 }
 
-# Проверка архитектуры
 check_arch() {
     local arch=$(uname -m)
     if [[ "$arch" == "x86_64" ]]; then
@@ -181,13 +177,11 @@ check_arch() {
     fi
 }
 
-# Проверка системных ресурсов
 check_resources() {
     local min_cpu="${1:-4}"
     local min_ram="${2:-8}"
     local min_disk="${3:-50}"
     
-    local errors=0
     local warnings=0
     
     # CPU
@@ -229,13 +223,12 @@ check_resources() {
     return $warnings
 }
 
-# Проверка интернет-соединения
 check_internet() {
     local test_hosts=("8.8.8.8" "1.1.1.1" "google.com")
     
     for host in "${test_hosts[@]}"; do
         if ping -c 1 -W 2 "$host" &>/dev/null; then
-            log_success "Интернет доступен (ping $host)"
+            log_success "Интернет доступен"
             return 0
         fi
     done
@@ -244,7 +237,6 @@ check_internet() {
     return 1
 }
 
-# Проверка DNS
 check_dns() {
     if nslookup google.com &>/dev/null || dig google.com &>/dev/null || host google.com &>/dev/null; then
         log_success "DNS работает"
@@ -255,7 +247,6 @@ check_dns() {
     fi
 }
 
-# Проверка порта (занят или нет)
 check_port_free() {
     local port="$1"
     
@@ -266,7 +257,6 @@ check_port_free() {
     return 0
 }
 
-# Проверка порта (доступен ли)
 check_port_open() {
     local host="$1"
     local port="$2"
@@ -283,7 +273,6 @@ check_port_open() {
 # ФУНКЦИИ РАБОТЫ С СЕРВИСАМИ
 # ============================================================================
 
-# Ожидание запуска сервиса
 wait_for_service() {
     local service="$1"
     local max_wait="${2:-30}"
@@ -307,7 +296,6 @@ wait_for_service() {
     return 0
 }
 
-# Проверка статуса сервиса
 check_service() {
     local service="$1"
     
@@ -320,7 +308,6 @@ check_service() {
     fi
 }
 
-# Перезапуск сервиса с проверкой
 restart_service() {
     local service="$1"
     
@@ -336,7 +323,6 @@ restart_service() {
     fi
 }
 
-# Создание systemd службы
 create_systemd_service() {
     local service_name="$1"
     local description="$2"
@@ -373,7 +359,6 @@ EOF
 # ФУНКЦИИ РАБОТЫ С МОДУЛЯМИ
 # ============================================================================
 
-# Проверка установлен ли модуль
 check_module_installed() {
     local module="$1"
     
@@ -383,16 +368,14 @@ check_module_installed() {
     return 1
 }
 
-# Отметка об установке модуля
 mark_module_installed() {
     local module="$1"
     
-    mkdir -p "$(dirname "$MODULES_STATE_FILE")"
+    ensure_dir "$(dirname "$MODULES_STATE_FILE")"
     echo "$module:$(date +%s)" >> "$MODULES_STATE_FILE"
     log_info "Модуль $module отмечен как установленный"
 }
 
-# Удаление отметки об установке модуля
 unmark_module_installed() {
     local module="$1"
     
@@ -402,7 +385,6 @@ unmark_module_installed() {
     fi
 }
 
-# Получение списка установленных модулей
 get_installed_modules() {
     if [[ -f "$MODULES_STATE_FILE" ]]; then
         cut -d':' -f1 "$MODULES_STATE_FILE"
@@ -413,23 +395,18 @@ get_installed_modules() {
 # ФУНКЦИИ ГЕНЕРАЦИИ И ВАЛИДАЦИИ
 # ============================================================================
 
-# Генерация случайного пароля
 generate_password() {
     local length="${1:-16}"
     
-    # Пробуем openssl
     if command -v openssl &>/dev/null; then
         openssl rand -base64 32 2>/dev/null | tr -d "=+/" | cut -c1-"$length"
-    # Пробуем /dev/urandom
     elif [[ -c /dev/urandom ]]; then
         tr -dc 'A-Za-z0-9!@#$%^&*()_+' < /dev/urandom | head -c "$length"
-    # Fallback на дату
     else
         echo "ChangeMe$(date +%s | sha256sum 2>/dev/null | base64 2>/dev/null | head -c 8 || echo "Pass123!")"
     fi
 }
 
-# Валидация IP адреса
 validate_ip() {
     local ip="$1"
     
@@ -446,7 +423,6 @@ validate_ip() {
     return 1
 }
 
-# Валидация доменного имени
 validate_domain() {
     local domain="$1"
     
@@ -456,7 +432,6 @@ validate_domain() {
     return 1
 }
 
-# Валидация email
 validate_email() {
     local email="$1"
     
@@ -466,7 +441,6 @@ validate_email() {
     return 1
 }
 
-# Валидация порта
 validate_port() {
     local port="$1"
     
@@ -476,25 +450,20 @@ validate_port() {
     return 1
 }
 
-# Валидация номера телефона
 validate_phone() {
     local phone="$1"
     local allow_internal="${2:-true}"
     
-    # Удаление всех нецифровых символов
     local clean_phone=$(echo "$phone" | tr -cd '0-9')
     
-    # Внутренний номер (3-4 цифры)
     if [[ "$allow_internal" == "true" ]] && [[ ${#clean_phone} -le 4 ]] && [[ ${#clean_phone} -ge 3 ]]; then
         return 0
     fi
     
-    # Мобильный номер (11 цифр, начинается с 7 или 8)
     if [[ ${#clean_phone} -eq 11 ]] && [[ "$clean_phone" =~ ^[78] ]]; then
         return 0
     fi
     
-    # Городской номер (5-10 цифр)
     if [[ ${#clean_phone} -ge 5 ]] && [[ ${#clean_phone} -le 10 ]]; then
         return 0
     fi
@@ -506,7 +475,6 @@ validate_phone() {
 # ФУНКЦИИ РАБОТЫ С ПАКЕТАМИ
 # ============================================================================
 
-# Проверка установлен ли пакет
 is_package_installed() {
     local pkg="$1"
     
@@ -516,7 +484,6 @@ is_package_installed() {
     return 1
 }
 
-# Установка пакета если не установлен
 ensure_package() {
     local pkg="$1"
     
@@ -528,7 +495,6 @@ ensure_package() {
     fi
 }
 
-# Проверка команды
 check_command() {
     local cmd="$1"
     
@@ -545,7 +511,6 @@ check_command() {
 # ФУНКЦИИ РАБОТЫ С ПОЛЬЗОВАТЕЛЯМИ
 # ============================================================================
 
-# Создание системного пользователя
 create_system_user() {
     local username="$1"
     local home_dir="${2:-/nonexistent}"
@@ -560,7 +525,6 @@ create_system_user() {
     log_info "Создан пользователь: $username"
 }
 
-# Добавление пользователя в группу
 add_user_to_group() {
     local username="$1"
     local group="$2"
@@ -578,22 +542,19 @@ add_user_to_group() {
 # ФУНКЦИИ РАБОТЫ С СЕТЬЮ
 # ============================================================================
 
-# Получение основного IP адреса
 get_primary_ip() {
     local ip=$(ip route get 1 2>/dev/null | awk '{print $NF;exit}')
     if [[ -n "$ip" ]] && [[ "$ip" != "127.0.0.1" ]]; then
         echo "$ip"
     else
         ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-        echo "${ip:-127.0.0.1}"
+        echo "${ip:-192.168.1.100}"
     fi
 }
 
-# Получение внешнего IP адреса
 get_external_ip() {
     local ip
     
-    # Пробуем разные сервисы
     for service in "ifconfig.me" "icanhazip.com" "api.ipify.org"; do
         ip=$(curl -s --max-time 3 "$service" 2>/dev/null)
         if [[ -n "$ip" ]] && validate_ip "$ip"; then
@@ -606,7 +567,6 @@ get_external_ip() {
     return 1
 }
 
-# Проверка доступности URL
 check_url() {
     local url="$1"
     local timeout="${2:-5}"
@@ -618,94 +578,9 @@ check_url() {
 }
 
 # ============================================================================
-# ФУНКЦИИ РАБОТЫ СО СТРОКАМИ
-# ============================================================================
-
-# Удаление ANSI цветов из строки
-strip_colors() {
-    echo "$1" | sed 's/\x1b\[[0-9;]*m//g'
-}
-
-# Обрезка строки до заданной длины
-truncate_string() {
-    local str="$1"
-    local max_len="${2:-80}"
-    
-    if [[ ${#str} -gt $max_len ]]; then
-        echo "${str:0:$((max_len - 3))}..."
-    else
-        echo "$str"
-    fi
-}
-
-# URL-кодирование строки
-urlencode() {
-    local str="$1"
-    local encoded=""
-    local char
-    
-    for ((i=0; i<${#str}; i++)); do
-        char="${str:i:1}"
-        case "$char" in
-            [a-zA-Z0-9.~_-]) encoded+="$char" ;;
-            *) encoded+=$(printf '%%%02X' "'$char") ;;
-        esac
-    done
-    echo "$encoded"
-}
-
-# ============================================================================
-# ФУНКЦИИ РАБОТЫ С JSON
-# ============================================================================
-
-# Получение значения из JSON (требуется jq)
-json_get() {
-    local json="$1"
-    local key="$2"
-    
-    if command -v jq &>/dev/null; then
-        echo "$json" | jq -r ".$key" 2>/dev/null
-    else
-        # Простой парсинг без jq
-        echo "$json" | grep -o "\"$key\":\"[^\"]*\"" | cut -d'"' -f4
-    fi
-}
-
-# Создание простого JSON объекта
-json_create() {
-    local result="{"
-    local first=true
-    
-    while [[ $# -gt 0 ]]; do
-        local key="$1"
-        local value="$2"
-        shift 2
-        
-        if [[ "$first" == "true" ]]; then
-            first=false
-        else
-            result+=","
-        fi
-        
-        # Проверка типа значения
-        if [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" == "true" ]] || [[ "$value" == "false" ]] || [[ "$value" == "null" ]]; then
-            result+="\"$key\":$value"
-        else
-            # Экранирование кавычек
-            value=$(echo "$value" | sed 's/"/\\"/g')
-            result+="\"$key\":\"$value\""
-        fi
-    done
-    
-    result+="}"
-    echo "$result"
-}
-
-# ============================================================================
 # ФУНКЦИИ ДЛЯ БАЗ ДАННЫХ
 # ============================================================================
 
-# Проверка подключения к PostgreSQL
 check_postgres_connection() {
     local host="${1:-localhost}"
     local port="${2:-5432}"
@@ -718,7 +593,6 @@ check_postgres_connection() {
     return 1
 }
 
-# Проверка подключения к Redis
 check_redis_connection() {
     local host="${1:-localhost}"
     local port="${2:-6379}"
@@ -739,7 +613,6 @@ check_redis_connection() {
 # ФУНКЦИИ ДЛЯ РЕЗЕРВНОГО КОПИРОВАНИЯ
 # ============================================================================
 
-# Создание резервной копии директории
 backup_directory() {
     local source_dir="$1"
     local backup_name="${2:-$(basename "$source_dir")}"
@@ -762,7 +635,6 @@ backup_directory() {
     fi
 }
 
-# Очистка старых резервных копий
 cleanup_old_backups() {
     local backup_dir="$1"
     local days="${2:-30}"
@@ -780,7 +652,6 @@ cleanup_old_backups() {
 # ФУНКЦИИ ДЛЯ ЛОГОВ
 # ============================================================================
 
-# Ротация логов
 rotate_logs() {
     local log_file="$1"
     local max_size="${2:-100M}"
@@ -807,7 +678,6 @@ rotate_logs() {
 # ФУНКЦИИ ДЛЯ ПРОГРЕСС-БАРА
 # ============================================================================
 
-# Отображение прогресса
 show_progress() {
     local current="$1"
     local total="$2"
@@ -827,7 +697,6 @@ show_progress() {
     fi
 }
 
-# Спиннер для длительных операций
 spinner() {
     local pid="$1"
     local message="${2:-Выполнение...}"
@@ -844,10 +713,85 @@ spinner() {
 }
 
 # ============================================================================
+# ФУНКЦИИ РАБОТЫ СО СТРОКАМИ
+# ============================================================================
+
+strip_colors() {
+    echo "$1" | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+truncate_string() {
+    local str="$1"
+    local max_len="${2:-80}"
+    
+    if [[ ${#str} -gt $max_len ]]; then
+        echo "${str:0:$((max_len - 3))}..."
+    else
+        echo "$str"
+    fi
+}
+
+urlencode() {
+    local str="$1"
+    local encoded=""
+    local char
+    
+    for ((i=0; i<${#str}; i++)); do
+        char="${str:i:1}"
+        case "$char" in
+            [a-zA-Z0-9.~_-]) encoded+="$char" ;;
+            *) encoded+=$(printf '%%%02X' "'$char") ;;
+        esac
+    done
+    echo "$encoded"
+}
+
+# ============================================================================
+# ФУНКЦИИ РАБОТЫ С JSON
+# ============================================================================
+
+json_get() {
+    local json="$1"
+    local key="$2"
+    
+    if command -v jq &>/dev/null; then
+        echo "$json" | jq -r ".$key" 2>/dev/null
+    else
+        echo "$json" | grep -o "\"$key\":\"[^\"]*\"" | cut -d'"' -f4
+    fi
+}
+
+json_create() {
+    local result="{"
+    local first=true
+    
+    while [[ $# -gt 0 ]]; do
+        local key="$1"
+        local value="$2"
+        shift 2
+        
+        if [[ "$first" == "true" ]]; then
+            first=false
+        else
+            result+=","
+        fi
+        
+        if [[ "$value" =~ ^[0-9]+$ ]] || [[ "$value" == "true" ]] || [[ "$value" == "false" ]] || [[ "$value" == "null" ]]; then
+            result+="\"$key\":$value"
+        else
+            value=$(echo "$value" | sed 's/"/\\"/g')
+            result+="\"$key\":\"$value\""
+        fi
+    done
+    
+    result+="}"
+    echo "$result"
+}
+
+# ============================================================================
 # ИНИЦИАЛИЗАЦИЯ
 # ============================================================================
 
-# Автоматическая инициализация логирования при подключении
 init_logging
 
 # Экспорт всех функций
@@ -862,12 +806,8 @@ export -f validate_ip validate_domain validate_email validate_port validate_phon
 export -f is_package_installed ensure_package check_command
 export -f create_system_user add_user_to_group
 export -f get_primary_ip get_external_ip check_url
-export -f strip_colors truncate_string urlencode
-export -f json_get json_create
 export -f check_postgres_connection check_redis_connection
 export -f backup_directory cleanup_old_backups
 export -f rotate_logs show_progress spinner
-
-# ============================================================================
-# КОНЕЦ ФАЙЛА
-# ============================================================================
+export -f strip_colors truncate_string urlencode
+export -f json_get json_create
