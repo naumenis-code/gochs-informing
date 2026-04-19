@@ -1624,9 +1624,9 @@ EOF
 
 create_systemd_services() {
     log_info "Создание systemd служб..."
-    
-    # gochs-api.service
-cat > /etc/systemd/system/gochs-api.service << EOF
+
+    # gochs-api.service (основной API)
+    cat > /etc/systemd/system/gochs-api.service << EOF
 [Unit]
 Description=ГО-ЧС API Service
 After=network.target postgresql.service redis-server.service asterisk.service
@@ -1637,7 +1637,7 @@ Type=simple
 User=$GOCHS_USER
 Group=$GOCHS_GROUP
 WorkingDirectory=$INSTALL_DIR
-Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=$INSTALL_DIR/venv/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
 ExecStart=$INSTALL_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
