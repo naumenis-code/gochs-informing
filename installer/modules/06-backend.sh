@@ -1688,14 +1688,16 @@ Wants=redis-server.service
 
 [Service]
 Type=simple
-User=gochs
-Group=gochs
-WorkingDirectory=/opt/gochs-informing
-Environment="PATH=/opt/gochs-informing/venv/bin:/usr/bin:/bin"
-Environment="PYTHONPATH=/opt/gochs-informing"
-ExecStart=/opt/gochs-informing/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q default
+User=$GOCHS_USER
+Group=$GOCHS_GROUP
+WorkingDirectory=$INSTALL_DIR
+Environment="PATH=$INSTALL_DIR/venv/bin"
+Environment="PYTHONPATH=$INSTALL_DIR"
+ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q default
 Restart=always
 RestartSec=10
+StandardOutput=append:$INSTALL_DIR/logs/worker.log
+StandardError=append:$INSTALL_DIR/logs/worker_error.log
 
 [Install]
 WantedBy=multi-user.target
