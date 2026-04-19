@@ -1771,6 +1771,13 @@ EOF
 post_install_fixes() {
     log_info "Применение финальных настроек..."
     
+    # Создать директорию для логов с правильными правами
+    log_info "Создание директории для логов..."
+    mkdir -p "$INSTALL_DIR/logs"
+    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/logs"
+    chmod 755 "$INSTALL_DIR/logs"
+    log_info "Права на директорию логов установлены"
+    
     # Получить пароль Redis и обновить в main.py
     local redis_pass=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
     if [[ -n "$redis_pass" ]] && [[ -f "$INSTALL_DIR/app/main.py" ]]; then
