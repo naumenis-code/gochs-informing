@@ -1383,11 +1383,6 @@ celery_app.conf.update(
     task_soft_time_limit=25 * 60,
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
-    task_routes={
-        "app.tasks.dialer_tasks.*": {"queue": "default"},
-        "app.tasks.tts_tasks.*": {"queue": "high_priority"},
-        "app.tasks.stt_tasks.*": {"queue": "stt"},
-    }
 )
 EOF
 
@@ -1395,7 +1390,6 @@ EOF
     cat > "$INSTALL_DIR/app/tasks/dialer_tasks.py" << 'EOF'
 #!/usr/bin/env python3
 import logging
-from uuid import UUID
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -1458,18 +1452,12 @@ def cleanup_old_recordings(days: int = 90):
     return {"status": "completed", "deleted": 0}
 EOF
 
-    # tasks __init__.py
+    # tasks __init__.py (ДОБАВЛЕНО)
     cat > "$INSTALL_DIR/app/tasks/__init__.py" << 'EOF'
 #!/usr/bin/env python3
 """Celery задачи"""
 
 from app.tasks.celery_app import celery_app
-
-# Импортируем задачи чтобы они зарегистрировались в Celery
-from app.tasks import dialer_tasks
-from app.tasks import tts_tasks
-from app.tasks import stt_tasks
-from app.tasks import cleanup_tasks
 
 __all__ = ["celery_app"]
 EOF
