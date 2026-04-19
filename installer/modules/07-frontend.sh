@@ -204,6 +204,7 @@ create_config_files() {
     "eslint": "^8.55.0",
     "eslint-plugin-react": "^7.33.2",
     "prettier": "^3.1.1"
+    "terser": "^5.37.0"
   },
   "scripts": {
     "dev": "vite",
@@ -1528,26 +1529,67 @@ build_frontend() {
         return 1
     }
     
+    # ИСПРАВЛЕНИЕ: Явная установка terser
+    log_info "Установка terser для минификации..."
+    npm install --save-dev terser 2>/dev/null || {
+        log_warn "Не удалось установить terser, пробуем альтернативный способ..."
+        npm install -D terser --legacy-peer-deps
+    }
+    
     # Установка дополнительных типов
     log_info "Установка дополнительных пакетов..."
     npm install --save-dev @types/node 2>/dev/null || true
+    
+    # Проверка наличия terser
+    if ! npm list terser &>/dev/null; then
+        log_warn "terser не обнаружен, устанавливаем глобально..."
+        npm install -g terser
+    fi
     
     # Сборка проекта
     log_info "Сборка React приложения..."
     npm run build 2>&1 | tee /tmp/npm_build.log
     
-    if [[ -d "$INSTALL_DIR/frontend/build" ]] || [[ -d "$INSTALL_DIR/frontend/dist" ]]; then
-        if [[ -d "$INSTALL_DIR/frontend/dist" ]] && [[ ! -d "$INSTALL_DIR/frontend/build" ]]; then
-            mv "$INSTALL_DIR/frontend/dist" "$INSTALL_DIR/frontend/build"
-        fi
-        log_info "Фронтенд успешно собран"
-        
-        chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/frontend/build" 2>/dev/null || true
-        chmod -R 755 "$INSTALL_DIR/frontend/build"
-    else
-        log_error "Ошибка сборки фронтенда (директория build не создана)"
+    BUILD_STATUS=${PIPESTATUS[0]}
+    
+    # Проверка результата сборки
+    if [[ $BUILD_STATUS -ne 0 ]]; then
+        log_error "Ошибка сборки фронтенда (код: $BUILD_STATUS)"
+        log_info "Последние 30 строк лога:"
+        tail -30 /tmp/npm_build.log
         return 1
     fi
+    
+    # Проверка наличия собранных файлов
+    if [[ -d "$INSTALL_DIR/frontend/build" ]]; then
+        log_info "✓ Директория build создана"
+    elif [[ -d "$INSTALL_DIR/frontend/dist" ]]; then
+        log_info "✓ Директория dist создана, переименовываем в build..."
+        mv "$INSTALL_DIR/frontend/dist" "$INSTALL_DIR/frontend/build"
+    else
+        log_error "✗ Директория build/dist не создана"
+        log_info "Содержимое frontend:"
+        ls -la "$INSTALL_DIR/frontend/"
+        return 1
+    fi
+    
+    # Проверка index.html
+    if [[ -f "$INSTALL_DIR/frontend/build/index.html" ]]; then
+        log_info "✓ index.html присутствует"
+    else
+        log_error "✗ index.html отсутствует в build"
+        log_info "Содержимое build:"
+        ls -la "$INSTALL_DIR/frontend/build/"
+        return 1
+    fi
+    
+    # Вывод размера сборки
+    BUILD_SIZE=$(du -sh "$INSTALL_DIR/frontend/build" 2>/dev/null | cut -f1)
+    log_info "✓ Фронтенд успешно собран (размер: $BUILD_SIZE)"
+    
+    # Установка прав
+    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/frontend/build" 2>/dev/null || true
+    chmod -R 755 "$INSTALL_DIR/frontend/build"
     
     cd "$SCRIPT_DIR"
 }
