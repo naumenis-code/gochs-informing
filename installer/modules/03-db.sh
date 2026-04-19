@@ -13,6 +13,12 @@ if [[ -f "${SCRIPT_DIR}/utils/common.sh" ]]; then
     source "${SCRIPT_DIR}/utils/common.sh"
 fi
 
+# Загрузка конфигурации
+CONFIG_FILE="${SCRIPT_DIR}/config/config.env"
+if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+fi
+
 MODULE_NAME="03-db"
 MODULE_DESCRIPTION="PostgreSQL база данных"
 
