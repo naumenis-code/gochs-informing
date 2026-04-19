@@ -168,31 +168,34 @@ EOF
         return 1
     fi
     
-    # Установка PyTorch отдельно (может быть проблематично)
-     # Гарантированная установка критических пакетов (даже если requirements.txt упал частично)
-    log_info "Принудительная установка критических пакетов..."
-    pip install --upgrade pip --quiet
-    pip install fastapi uvicorn[standard] sqlalchemy redis celery pydantic pydantic-settings --quiet
-    pip install email-validator python-multipart python-jose[cryptography] passlib[bcrypt] --quiet
-    pip install pyst2==0.5.1 py-asterisk==0.5.20 --quiet
-    pip install asyncpg psycopg2-binary --quiet
-    pip install --force-reinstall email-validator bcrypt==4.0.1 passlib==1.7.4 --quiet
-    pip install email-validator
-    log_info "Критические пакеты установлены"
-
-    # Установка PyTorch отдельно (может быть проблематично)
+     # Установка PyTorch отдельно
     log_info "Установка PyTorch..."
     pip install torch==2.1.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cpu
     
-        # ============================================================
-    # Загрузка моделей для Vosk - ВРЕМЕННО ОТКЛЮЧЕНО (ограничения сети)
     # ============================================================
-    log_warn "Пропускаем загрузку модели Vosk (ограничения сети)"
-    log_warn "Модель можно скачать позже вручную:"
-    log_warn "  cd /opt/gochs-informing/models/vosk"
-    log_warn "  wget https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
-    log_warn "  unzip vosk-model-small-ru-0.22.zip && mv vosk-model-small-ru-0.22 model-ru"
+    # Загрузка моделей для Vosk с вашего зеркала
+    # ============================================================
+    log_info "Загрузка модели Vosk для русского языка..."
     mkdir -p "$INSTALL_DIR/models/vosk"
+    cd "$INSTALL_DIR/models/vosk"
+    
+    if [[ ! -f "vosk-model-small-ru-0.22.zip" ]]; then
+        log_info "Скачивание с https://mexok.narod.ru/gochs-informin/vosk-model-small-ru-0.22.zip"
+        wget -q --show-progress --timeout=120 https://mexok.narod.ru/gochs-informin/vosk-model-small-ru-0.22.zip || {
+            log_warn "Не удалось скачать модель Vosk. Продолжаем без неё."
+        }
+        
+        if [[ -f "vosk-model-small-ru-0.22.zip" ]]; then
+            log_info "Распаковка модели Vosk..."
+            unzip -q vosk-model-small-ru-0.22.zip
+            mv vosk-model-small-ru-0.22 model-ru
+            rm vosk-model-small-ru-0.22.zip
+            chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/models/vosk"
+            log_info "✅ Модель Vosk установлена"
+        fi
+    else
+        log_info "Модель Vosk уже существует, пропускаем загрузку"
+    fi
     
     # ============================================================
     # Загрузка моделей для Coqui TTS с быстрого зеркала Hugging Face
@@ -201,7 +204,6 @@ EOF
     mkdir -p "$INSTALL_DIR/models/tts"
     cd "$INSTALL_DIR/models/tts"
 
-    # Скачивание модели XTTS-v2
     log_info "Скачивание model.pth (около 1.7 ГБ)..."
     if [[ ! -f "model.pth" ]]; then
         wget -q --show-progress --timeout=120 https://huggingface.co/coqui/XTTS-v2/resolve/main/model.pth || {
