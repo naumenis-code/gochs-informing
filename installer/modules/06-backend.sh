@@ -329,6 +329,10 @@ async def health_check():
     
     return health_status
 
+@app.get("/api/health")
+async def api_health():
+    """Эндпоинт для фронтенда"""
+    return await health_check()
 
 if __name__ == "__main__":
     import uvicorn
@@ -722,7 +726,7 @@ EOF
 """Аутентификация"""
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import timedelta
 
@@ -733,6 +737,8 @@ from app.api.deps import get_current_user
 from app.core.config import settings
 
 router = APIRouter()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
 
 @router.post("/login", response_model=Token)
 async def login(
