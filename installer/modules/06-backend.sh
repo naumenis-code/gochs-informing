@@ -1848,15 +1848,10 @@ post_install_fixes() {
     
     # Создаём пользователя через Python
     source "$INSTALL_DIR/venv/bin/activate"
-    
-    # Передаём пароль через переменную окружения
-    export DB_PASSWORD="$POSTGRES_PASSWORD"
-    
     python3 << 'PYTHON_SCRIPT'
 import sys
 sys.path.insert(0, '/opt/gochs-informing')
 
-import os
 import asyncio
 from passlib.context import CryptContext
 import asyncpg
@@ -1865,13 +1860,11 @@ async def create_admin():
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     hashed = pwd_context.hash("Admin123!")
     
-    db_password = os.environ.get('DB_PASSWORD', 'gochs_password')
-    
     conn = await asyncpg.connect(
         host="localhost",
         database="gochs",
         user="gochs_user",
-        password=db_password
+        password="PASSWORD_PLACEHOLDER"
     )
     
     try:
@@ -1896,7 +1889,6 @@ async def create_admin():
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            print("✓ Таблица users создана")
         
         # Проверяем существование admin
         existing = await conn.fetchrow("SELECT id FROM users WHERE username = 'admin'")
@@ -1921,7 +1913,9 @@ async def create_admin():
 asyncio.run(create_admin())
 PYTHON_SCRIPT
 
-    unset DB_PASSWORD
+    # Заменяем плейсхолдер пароля в скрипте
+    sed -i "s/PASSWORD_PLACEHOLDER/$POSTGRES_PASSWORD/g" "$INSTALL_DIR/scripts/create_admin.py" 2>/dev/null || true
+    
     deactivate 2>/dev/null || true
 
     log_info "Финальные настройки применены"
