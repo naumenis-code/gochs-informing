@@ -126,7 +126,7 @@ aiofiles==23.2.1
 # ------------------------------------------------------------------------------
 pydantic==2.5.0
 pydantic-settings==2.1.0
-email-validator==2.1.0
+email-validator==2.3.0
 phonenumbers==8.13.25
 
 # Utilities
