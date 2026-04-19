@@ -184,52 +184,53 @@ EOF
     log_info "Установка PyTorch..."
     pip install torch==2.1.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cpu
     
-    # Загрузка моделей для Vosk (русская модель)
-    log_info "Загрузка модели Vosk для русского языка..."
+        # ============================================================
+    # Загрузка моделей для Vosk - ВРЕМЕННО ОТКЛЮЧЕНО (ограничения сети)
+    # ============================================================
+    log_warn "Пропускаем загрузку модели Vosk (ограничения сети)"
+    log_warn "Модель можно скачать позже вручную:"
+    log_warn "  cd /opt/gochs-informing/models/vosk"
+    log_warn "  wget https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+    log_warn "  unzip vosk-model-small-ru-0.22.zip && mv vosk-model-small-ru-0.22 model-ru"
     mkdir -p "$INSTALL_DIR/models/vosk"
-    cd "$INSTALL_DIR/models/vosk"
     
-    # Загрузка маленькой русской модели (примерно 40MB)
-    if [[ ! -f "vosk-model-small-ru-0.22.zip" ]]; then
-        wget -q --show-progress https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip
-        unzip -q vosk-model-small-ru-0.22.zip
-        mv vosk-model-small-ru-0.22 model-ru
-        rm vosk-model-small-ru-0.22.zip
-    fi
-    
-    # Загрузка моделей для Coqui TTS (русский голос)
-    log_info "Загрузка моделей TTS для русского языка..."
+    # ============================================================
+    # Загрузка моделей для Coqui TTS с быстрого зеркала Hugging Face
+    # ============================================================
+    log_info "Загрузка модели TTS для русского языка с Hugging Face..."
     mkdir -p "$INSTALL_DIR/models/tts"
-    
-    # Создание скрипта для загрузки моделей TTS
-    cat > "$INSTALL_DIR/download_tts_models.py" << 'PYEOF'
-#!/usr/bin/env python3
-import sys
-import os
-sys.path.append('/opt/gochs-informing/venv/lib/python3.11/site-packages')
+    cd "$INSTALL_DIR/models/tts"
 
-try:
-    from TTS.api import TTS
-    
-    # Загрузка русской модели
-    print("Загрузка русской TTS модели...")
-    tts = TTS(model_name="tts_models/ru/ruslan/tacotron2-DDC", progress_bar=True)
-    print("Модель TTS загружена успешно")
-    
-except Exception as e:
-    print(f"Ошибка загрузки модели TTS: {e}")
-    sys.exit(1)
-PYEOF
-
-    chmod +x "$INSTALL_DIR/download_tts_models.py"
-    
-    # Запуск загрузки моделей
-    source "$INSTALL_DIR/venv/bin/activate"
-    if python "$INSTALL_DIR/download_tts_models.py"; then
-        log_info "Модели TTS загружены успешно"
-    else
-        log_warn "Не удалось загрузить модели TTS. Их можно будет загрузить позже."
+    # Скачивание модели XTTS-v2
+    log_info "Скачивание model.pth (около 1.7 ГБ)..."
+    if [[ ! -f "model.pth" ]]; then
+        wget -q --show-progress --timeout=120 https://huggingface.co/coqui/XTTS-v2/resolve/main/model.pth || {
+            log_warn "Не удалось скачать model.pth с Hugging Face"
+        }
     fi
+    
+    log_info "Скачивание config.json..."
+    if [[ ! -f "config.json" ]]; then
+        wget -q --show-progress --timeout=60 https://huggingface.co/coqui/XTTS-v2/resolve/main/config.json || {
+            log_warn "Не удалось скачать config.json"
+        }
+    fi
+    
+    log_info "Скачивание vocab.json..."
+    if [[ ! -f "vocab.json" ]]; then
+        wget -q --show-progress --timeout=60 https://huggingface.co/coqui/XTTS-v2/resolve/main/vocab.json || {
+            log_warn "Не удалось скачать vocab.json"
+        }
+    fi
+    
+    if [[ -f "model.pth" ]]; then
+        log_info "✅ Модель TTS загружена успешно"
+        chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/models/tts"
+    else
+        log_warn "⚠️ Модель TTS не загружена. Будет использоваться espeak."
+    fi
+    
+    cd "$SCRIPT_DIR"
     
     # Создание скрипта активации окружения
     cat > "$INSTALL_DIR/activate_env.sh" << 'EOF'
