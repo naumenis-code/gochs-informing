@@ -345,41 +345,81 @@ install_asterisk() {
     cd /
     rm -rf /usr/src/asterisk-${ASTERISK_FULL_VERSION}*
 
-    # Установка русских звуковых файлов
+      # ============================================================
+    # Установка русских звуковых файлов Asterisk (ИСПРАВЛЕНО)
+    # ============================================================
     log_info "Установка русских звуковых файлов Asterisk..."
     cd /var/lib/asterisk/sounds
-    
+
     # Создаем директорию для русского языка
     mkdir -p /var/lib/asterisk/sounds/ru
-    
+
     # Скачиваем базовые звуки на русском
-    wget -q https://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-ru-wav-current.tar.gz || {
-        log_warn "Не удалось скачать русские звуки с основного зеркала, пробуем альтернативное..."
-        wget -q http://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-ru-wav-current.tar.gz
-    }
+    log_info "Загрузка asterisk-core-sounds-ru-wav-current.tar.gz..."
+    if ! wget -q --show-progress --timeout=30 https://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-ru-wav-current.tar.gz 2>/dev/null; then
+        log_warn "Не удалось скачать с основного зеркала, пробуем альтернативное..."
+        if ! wget -q --show-progress --timeout=30 http://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-ru-wav-current.tar.gz 2>/dev/null; then
+            log_warn "Не удалось скачать русские звуки. Продолжаем без них."
+        fi
+    fi
+
+    # Распаковываем если архив существует
+    if [ -f asterisk-core-sounds-ru-wav-current.tar.gz ]; then
+        log_info "Распаковка русских звуковых файлов..."
+        tar -xzf asterisk-core-sounds-ru-wav-current.tar.gz
+        rm -f asterisk-core-sounds-ru-wav-current.tar.gz
+        
+        # Перемещаем файлы в правильную директорию если они распаковались в поддиректорию
+        if [ -d "ru" ]; then
+            mv ru/* . 2>/dev/null || true
+        fi
+        
+        log_info "Русские звуковые файлы установлены"
+    fi
+
+    # Устанавливаем права на все звуковые файлы
+    chown -R asterisk:asterisk /var/lib/asterisk/sounds/
+    chmod -R 755 /var/lib/asterisk/sounds/
     
-    # Распаковываем
-    tar -xzf asterisk-core-sounds-ru-wav-current.tar.gz -C /var/lib/asterisk/sounds/
-    rm -f asterisk-core-sounds-ru-wav-current.tar.gz
-    
-    # Устанавливаем права
-    chown -R asterisk:asterisk /var/lib/asterisk/sounds/ru
-    chmod -R 755 /var/lib/asterisk/sounds/ru
-    
-    log_info "Русские звуковые файлы установлены"
-    
-    # Создание аудио Playbook из текстового файла
+    # ============================================================
+    # Генерация аудио Playbook через TTS (ИСПРАВЛЕНО)
+    # ============================================================
     if [ -f /opt/gochs-informing/playbooks/welcome.txt ]; then
         log_info "Генерация аудио Playbook через TTS..."
-        # Здесь должен быть вызов TTS для конвертации текста в WAV
-        # Пока создаем заглушку через espeak
+        
+        # Устанавливаем espeak если его нет
+        if ! command -v espeak &> /dev/null; then
+            log_info "Установка espeak для синтеза речи..."
+            apt-get update -qq
+            apt-get install -y espeak espeak-data 2>/dev/null || {
+                log_warn "Не удалось установить espeak. Пропускаем генерацию аудио."
+            }
+        fi
+        
+        # Генерируем WAV файл из текста
         if command -v espeak &> /dev/null; then
-            espeak -v ru -f /opt/gochs-informing/playbooks/welcome.txt -w /opt/gochs-informing/playbooks/welcome.wav
-            chown asterisk:asterisk /opt/gochs-informing/playbooks/welcome.wav
-            log_info "Аудио Playbook создан"
+            log_info "Синтез речи через espeak..."
+            espeak -v ru -s 150 -p 50 -f /opt/gochs-informing/playbooks/welcome.txt -w /opt/gochs-informing/playbooks/welcome.wav
+            
+            # Проверяем что файл создан
+            if [ -f /opt/gochs-informing/playbooks/welcome.wav ]; then
+                # Конвертируем в формат совместимый с Asterisk (8kHz, mono)
+                if command -v sox &> /dev/null; then
+                    sox /opt/gochs-informing/playbooks/welcome.wav -r 8000 -c 1 -b 16 /opt/gochs-informing/playbooks/welcome_8k.wav
+                    mv /opt/gochs-informing/playbooks/welcome_8k.wav /opt/gochs-informing/playbooks/welcome.wav
+                fi
+                
+                chown asterisk:asterisk /opt/gochs-informing/playbooks/welcome.wav
+                chmod 644 /opt/gochs-informing/playbooks/welcome.wav
+                log_info "Аудио Playbook создан: /opt/gochs-informing/playbooks/welcome.wav"
+            else
+                log_warn "Не удалось создать аудио Playbook"
+            fi
         else
             log_warn "espeak не установлен, аудио Playbook не создан"
         fi
+    else
+        log_warn "Файл /opt/gochs-informing/playbooks/welcome.txt не найден"
     fi
     
     log_info "Asterisk $ASTERISK_FULL_VERSION установлен"
