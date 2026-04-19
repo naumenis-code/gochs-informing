@@ -166,7 +166,7 @@ EOF
 
 create_database_and_user() {
     log_info "Создание базы данных и пользователя..."
-    
+
     # Создание пользователя и базы данных
     sudo -u postgres psql << EOF
 DROP DATABASE IF EXISTS $POSTGRES_DB;
@@ -179,6 +179,8 @@ CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO $POSTGRES_USER;
 GRANT ALL PRIVILEGES ON SCHEMA public TO $POSTGRES_USER;
 ALTER DATABASE $POSTGRES_DB OWNER TO $POSTGRES_USER;
+-- ГАРАНТИРОВАННАЯ ПЕРЕДАЧА ПРАВ: Делаем gochs_user владельцем схемы public
+ALTER SCHEMA public OWNER TO $POSTGRES_USER;
 EOF
 
     # Проверка успешности создания
@@ -188,7 +190,7 @@ EOF
         log_error "Не удалось создать базу данных $POSTGRES_DB"
         return 1
     fi
-    
+
     if sudo -u postgres psql -c "SELECT 1 FROM pg_roles WHERE rolname='$POSTGRES_USER'" | grep -q 1; then
         log_info "Пользователь $POSTGRES_USER создан успешно"
     else
@@ -558,6 +560,7 @@ uninstall() {
         sudo -u postgres psql << EOF
 DROP DATABASE IF EXISTS $POSTGRES_DB;
 DROP USER IF EXISTS $POSTGRES_USER;
+ALTER SCHEMA public OWNER TO $POSTGRES_USER;
 EOF
         log_info "База данных удалена"
     fi
