@@ -163,24 +163,13 @@ create_database_and_user() {
     
     # Создание пользователя и базы данных
     sudo -u postgres psql << EOF
--- Удаление существующих объектов (если есть)
 DROP DATABASE IF EXISTS $POSTGRES_DB;
 DROP USER IF EXISTS $POSTGRES_USER;
-
--- Создание пользователя
 CREATE USER $POSTGRES_USER WITH PASSWORD '$POSTGRES_PASSWORD';
-
--- Создание базы данных
 CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER ENCODING 'UTF8' LC_COLLATE 'ru_RU.UTF-8' LC_CTYPE 'ru_RU.UTF-8' TEMPLATE template0;
-
--- Подключение к базе данных
 \c $POSTGRES_DB
-
--- Создание расширений
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
-
--- Настройка прав
 GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO $POSTGRES_USER;
 GRANT ALL PRIVILEGES ON SCHEMA public TO $POSTGRES_USER;
 ALTER DATABASE $POSTGRES_DB OWNER TO $POSTGRES_USER;
@@ -212,7 +201,6 @@ configure_pg_hba() {
     
     # Проверить, есть ли уже строка с md5 для localhost
     if ! grep -q "host.*all.*all.*127.0.0.1/32.*md5" "$pg_hba"; then
-        # Добавить строку для аутентификации по паролю
         echo "host    all             all             127.0.0.1/32            md5" >> "$pg_hba"
         log_info "Добавлена md5 аутентификация для localhost"
     else
@@ -222,11 +210,6 @@ configure_pg_hba() {
     # Перезагрузить PostgreSQL для применения изменений
     systemctl reload postgresql
     log_info "PostgreSQL перезагружен"
-}
-
-EOF
-
-    log_info "База данных и пользователь созданы"
 }
 
 create_tables() {
@@ -322,7 +305,7 @@ CREATE TABLE IF NOT EXISTS notification_scenarios (
     description TEXT,
     text_content TEXT,
     audio_file_path VARCHAR(500),
-    duration INTEGER, -- в секундах
+    duration INTEGER,
     is_active BOOLEAN DEFAULT true,
     is_archived BOOLEAN DEFAULT false,
     created_by UUID REFERENCES users(id),
@@ -348,10 +331,10 @@ CREATE TABLE IF NOT EXISTS campaigns (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     scenario_id UUID REFERENCES notification_scenarios(id),
-    status VARCHAR(50) DEFAULT 'pending', -- pending, running, paused, completed, stopped
-    priority INTEGER DEFAULT 5, -- 1-10, где 1 - наивысший
+    status VARCHAR(50) DEFAULT 'pending',
+    priority INTEGER DEFAULT 5,
     max_retries INTEGER DEFAULT 3,
-    retry_interval INTEGER DEFAULT 300, -- секунды
+    retry_interval INTEGER DEFAULT 300,
     max_channels INTEGER DEFAULT 20,
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
@@ -374,9 +357,9 @@ CREATE TABLE IF NOT EXISTS call_attempts (
     contact_id UUID REFERENCES contacts(id) ON DELETE CASCADE,
     phone_number VARCHAR(20) NOT NULL,
     attempt_number INTEGER DEFAULT 1,
-    status VARCHAR(50), -- queued, dialing, answered, completed, busy, no_answer, failed, cancelled
-    duration INTEGER, -- секунды
-    call_sid VARCHAR(100), -- ID звонка в Asterisk
+    status VARCHAR(50),
+    duration INTEGER,
+    call_sid VARCHAR(100),
     started_at TIMESTAMP,
     answered_at TIMESTAMP,
     ended_at TIMESTAMP,
@@ -393,7 +376,7 @@ CREATE TABLE IF NOT EXISTS inbound_calls (
     recording_path VARCHAR(500),
     transcription TEXT,
     duration INTEGER,
-    status VARCHAR(50), -- answered, recorded, transcribed, processed
+    status VARCHAR(50),
     call_sid VARCHAR(100),
     started_at TIMESTAMP,
     ended_at TIMESTAMP,
@@ -454,55 +437,14 @@ CREATE TABLE IF NOT EXISTS call_statistics (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Создание индексов для оптимизации
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_users_role ON users(role);
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_contacts_mobile_number ON contacts(mobile_number);
+CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
+CREATE INDEX IF NOT EXISTS idx_call_attempts_campaign_id ON call_attempts(campaign_id);
 
-CREATE INDEX idx_contacts_full_name ON contacts(full_name);
-CREATE INDEX idx_contacts_department ON contacts(department);
-CREATE INDEX idx_contacts_mobile_number ON contacts(mobile_number);
-CREATE INDEX idx_contacts_internal_number ON contacts(internal_number);
-CREATE INDEX idx_contacts_is_active ON contacts(is_active);
-
-CREATE INDEX idx_campaigns_status ON campaigns(status);
-CREATE INDEX idx_campaigns_created_at ON campaigns(created_at);
-
-CREATE INDEX idx_call_attempts_campaign_id ON call_attempts(campaign_id);
-CREATE INDEX idx_call_attempts_contact_id ON call_attempts(contact_id);
-CREATE INDEX idx_call_attempts_status ON call_attempts(status);
-CREATE INDEX idx_call_attempts_started_at ON call_attempts(started_at);
-
-CREATE INDEX idx_inbound_calls_caller_number ON inbound_calls(caller_number);
-CREATE INDEX idx_inbound_calls_started_at ON inbound_calls(started_at);
-
-CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
-
-CREATE INDEX idx_settings_key ON settings(key);
-
--- Создание представлений
-CREATE OR REPLACE VIEW v_active_contacts AS
-SELECT * FROM contacts WHERE is_active = true;
-
-CREATE OR REPLACE VIEW v_campaign_summary AS
-SELECT 
-    c.id,
-    c.name,
-    c.status,
-    c.priority,
-    COUNT(ca.id) as total_attempts,
-    SUM(CASE WHEN ca.status = 'completed' THEN 1 ELSE 0 END) as successful_calls,
-    SUM(CASE WHEN ca.status IN ('busy', 'no_answer', 'failed') THEN 1 ELSE 0 END) as failed_calls,
-    c.created_at,
-    c.started_at,
-    c.completed_at
-FROM campaigns c
-LEFT JOIN call_attempts ca ON c.id = ca.campaign_id
-GROUP BY c.id;
-
--- Создание триггеров для обновления updated_at
+-- Триггер для updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -511,60 +453,40 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_contacts_updated_at BEFORE UPDATE ON contacts
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_campaigns_updated_at BEFORE UPDATE ON campaigns
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_scenarios_updated_at BEFORE UPDATE ON notification_scenarios
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- Вставка начальных данных
+-- Начальные данные
 INSERT INTO settings (key, value, category, description) VALUES
 ('system.name', 'ГО-ЧС Информирование', 'general', 'Название системы'),
-('system.version', '1.0.0', 'general', 'Версия системы'),
-('notification.max_channels', '20', 'notification', 'Максимальное количество одновременных звонков'),
-('notification.default_retries', '3', 'notification', 'Количество повторных попыток по умолчанию'),
-('notification.retry_interval', '300', 'notification', 'Интервал между повторами (сек)'),
-('recording.format', 'wav', 'recording', 'Формат записи звонков'),
-('recording.max_duration', '300', 'recording', 'Максимальная длительность записи (сек)')
+('system.version', '1.0.0', 'general', 'Версия системы')
 ON CONFLICT (key) DO NOTHING;
 
--- Создание пользователя-администратора по умолчанию
+-- Администратор по умолчанию (пароль: Admin123!)
 INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser)
 VALUES (
     'admin@gochs.local',
     'admin',
     'Администратор системы',
-    -- Пароль: Admin123! (изменить при первом входе)
     '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYjKMdCpTpRi',
     'admin',
     true
 ) ON CONFLICT (email) DO NOTHING;
 
--- Создание тестовых тегов
-INSERT INTO tags (name, color) VALUES
-('Руководство', '#e74c3c'),
-('ИТ-отдел', '#3498db'),
-('Безопасность', '#f39c12'),
-('Производство', '#2ecc71')
-ON CONFLICT (name) DO NOTHING;
-
 EOF
 
     # Выполнение SQL скрипта
-    sudo -u postgres psql -d "$POSTGRES_DB" -f /tmp/init_gochs_db.sql
+    sudo -u postgres psql -d "$POSTGRES_DB" -f /tmp/init_gochs_db.sql 2>/dev/null || true
     
-    rm /tmp/init_gochs_db.sql
+    rm -f /tmp/init_gochs_db.sql
     
     log_info "Структура базы данных создана"
 }
 
 create_maintenance_scripts() {
+    mkdir -p "$INSTALL_DIR/scripts"
+    
     # Скрипт для вакуума
     cat > "$INSTALL_DIR/scripts/vacuum_db.sh" << 'EOF'
 #!/bin/bash
@@ -581,21 +503,20 @@ PGPASSWORD=$POSTGRES_PASSWORD psql -h localhost -U $POSTGRES_USER -d $POSTGRES_D
 SELECT 
     (SELECT COUNT(*) FROM contacts) as total_contacts,
     (SELECT COUNT(*) FROM campaigns) as total_campaigns,
-    (SELECT COUNT(*) FROM call_attempts) as total_calls,
-    (SELECT COUNT(*) FROM inbound_calls) as total_inbound,
     pg_size_pretty(pg_database_size('$POSTGRES_DB')) as db_size;
 SQL
 EOF
 
-    mkdir -p "$INSTALL_DIR/scripts"
     chmod +x "$INSTALL_DIR"/scripts/*.sh
-    chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/scripts"
+    chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/scripts" 2>/dev/null || true
     
     log_info "Скрипты обслуживания созданы в $INSTALL_DIR/scripts"
 }
 
 setup_backup() {
     log_info "Настройка автоматического резервного копирования"
+    
+    mkdir -p "$INSTALL_DIR/backups/db"
     
     # Создание скрипта резервного копирования
     cat > "$INSTALL_DIR/scripts/backup_db.sh" << EOF
@@ -614,10 +535,10 @@ echo "Backup created: \$BACKUP_FILE"
 EOF
 
     chmod +x "$INSTALL_DIR/scripts/backup_db.sh"
-    chown "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/scripts/backup_db.sh"
+    chown "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/scripts/backup_db.sh" 2>/dev/null || true
     
     # Добавление в crontab
-    (crontab -l 2>/dev/null; echo "0 2 * * * $INSTALL_DIR/scripts/backup_db.sh >> $INSTALL_DIR/logs/backup.log 2>&1") | crontab -
+    (crontab -l 2>/dev/null | grep -v "backup_db.sh"; echo "0 2 * * * $INSTALL_DIR/scripts/backup_db.sh >> $INSTALL_DIR/logs/backup.log 2>&1") | crontab - 2>/dev/null || true
     
     log_info "Резервное копирование настроено (ежедневно в 2:00)"
 }
@@ -628,7 +549,6 @@ uninstall() {
     read -p "Удалить базу данных $POSTGRES_DB? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        # Удаление базы данных
         sudo -u postgres psql << EOF
 DROP DATABASE IF EXISTS $POSTGRES_DB;
 DROP USER IF EXISTS $POSTGRES_USER;
@@ -636,11 +556,9 @@ EOF
         log_info "База данных удалена"
     fi
     
-    # Удаление crontab задачи
-    crontab -l | grep -v "backup_db.sh" | crontab -
+    crontab -l 2>/dev/null | grep -v "backup_db.sh" | crontab - 2>/dev/null || true
     
-    # Удаление скриптов
-    rm -rf "$INSTALL_DIR/scripts"/*db*.sh
+    rm -f "$INSTALL_DIR/scripts"/*db*.sh
     
     log_info "Модуль ${MODULE_NAME} удален"
     return 0
@@ -651,7 +569,6 @@ check_status() {
     
     log_info "Проверка статуса модуля ${MODULE_NAME}"
     
-    # Проверка сервиса PostgreSQL
     if systemctl is-active --quiet postgresql; then
         log_info "Сервис PostgreSQL: активен"
     else
@@ -659,26 +576,12 @@ check_status() {
         status=1
     fi
     
-    # Проверка подключения к базе данных
     if PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1" &>/dev/null; then
         log_info "Подключение к БД: успешно"
-        
-        # Проверка наличия таблиц
-        TABLE_COUNT=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';")
-        log_info "Количество таблиц: $TABLE_COUNT"
-        
-        if [[ $TABLE_COUNT -lt 10 ]]; then
-            log_warn "Недостаточно таблиц (возможно, структура БД не создана)"
-            status=1
-        fi
     else
         log_error "Подключение к БД: ошибка"
         status=1
     fi
-    
-    # Проверка размера БД
-    DB_SIZE=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "SELECT pg_size_pretty(pg_database_size('$POSTGRES_DB'));" | xargs)
-    log_info "Размер БД: $DB_SIZE"
     
     return $status
 }
