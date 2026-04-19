@@ -169,6 +169,16 @@ EOF
     fi
     
     # Установка PyTorch отдельно (может быть проблематично)
+     # Гарантированная установка критических пакетов (даже если requirements.txt упал частично)
+    log_info "Принудительная установка критических пакетов..."
+    pip install --upgrade pip --quiet
+    pip install fastapi uvicorn[standard] sqlalchemy redis celery pydantic pydantic-settings --quiet
+    pip install email-validator python-multipart python-jose[cryptography] passlib[bcrypt] --quiet
+    pip install pyst2==0.5.1 py-asterisk==0.5.20 --quiet
+    pip install asyncpg psycopg2-binary --quiet
+    log_info "Критические пакеты установлены"
+
+    # Установка PyTorch отдельно (может быть проблематично)
     log_info "Установка PyTorch..."
     pip install torch==2.1.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cpu
     
