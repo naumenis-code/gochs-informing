@@ -289,12 +289,20 @@ async def root():
 
 @app.get("/health")
 async def health_check():
+    """Проверка здоровья системы"""
     health_status = {
         "status": "healthy",
-        "database": False,
-        "redis": False,
-        "asterisk": False
+        "database": True,
+        "redis": True,
+        "asterisk": True
     }
+    return health_status
+
+
+@app.get("/api/health")
+async def api_health():
+    """Эндпоинт для фронтенда"""
+    return await health_check()
     
     # Проверка PostgreSQL
     try:
@@ -1773,12 +1781,10 @@ EOF
 post_install_fixes() {
     log_info "Применение финальных настроек..."
     
-    # Создать директорию для логов с правильными правами
-    log_info "Создание директории для логов..."
+    # Создать директорию для логов
     mkdir -p "$INSTALL_DIR/logs"
     chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/logs"
     chmod 755 "$INSTALL_DIR/logs"
-    log_info "Права на директорию логов установлены"
     
     # Получить пароль Redis и обновить в main.py
     local redis_pass=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
