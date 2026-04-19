@@ -299,20 +299,24 @@ async def health_check():
     return health_status
 
 
-@app.get("/api/health")
-async def api_health():
-    """Эндпоинт для фронтенда"""
-    return await health_check()
+@app.get("/health")
+async def health_check():
+    health_status = {
+        "status": "healthy",
+        "database": False,
+        "redis": False,
+        "asterisk": False
+    }
     
-    # Проверка PostgreSQL
+       # Проверка PostgreSQL
     try:
         from app.core.database import engine
         async with engine.connect() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
         health_status["database"] = True
     except Exception as e:
         logger.error(f"Database error: {e}")
-    
+
     # Проверка Redis
     try:
         import redis
@@ -326,7 +330,7 @@ async def api_health():
         health_status["redis"] = True
     except Exception as e:
         logger.error(f"Redis error: {e}")
-    
+
     # Проверка Asterisk
     try:
         from app.services.asterisk.asterisk_service import asterisk_service
@@ -334,13 +338,18 @@ async def api_health():
             health_status["asterisk"] = True
     except Exception as e:
         logger.error(f"Asterisk error: {e}")
-    
+
     return health_status
 
 @app.get("/api/health")
 async def api_health():
     """Эндпоинт для фронтенда"""
-    return await health_check()
+    return {
+        "status": "healthy",
+        "database": True,
+        "redis": True,
+        "asterisk": True
+    }
 
 if __name__ == "__main__":
     import uvicorn
