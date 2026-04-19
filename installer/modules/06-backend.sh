@@ -1843,37 +1843,28 @@ post_install_fixes() {
     # ============================================================
     log_info "Создание администратора в базе данных..."
     
-    # Ждём готовности БД
     sleep 3
     
-    # Создаём пользователя через Python
     source "$INSTALL_DIR/venv/bin/activate"
+    export DB_PASSWORD="$POSTGRES_PASSWORD"
+    
     python3 << 'PYTHON_SCRIPT'
-import sys
+import sys, os, asyncio
 sys.path.insert(0, '/opt/gochs-informing')
 
-import asyncio
 from passlib.context import CryptContext
 import asyncpg
 
 async def create_admin():
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     hashed = pwd_context.hash("Admin123!")
+    db_password = os.environ.get('DB_PASSWORD', 'gochs_password')
     
-    conn = await asyncpg.connect(
-        host="localhost",
-        database="gochs",
-        user="gochs_user",
-        password="PASSWORD_PLACEHOLDER"
-    )
+    conn = await asyncpg.connect(host="localhost", database="gochs", user="gochs_user", password=db_password)
     
     try:
-        # Проверяем существование таблицы users
         tables = await conn.fetch("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
-        table_names = [t['tablename'] for t in tables]
-        
-        if 'users' not in table_names:
-            print("⚠ Таблица users не найдена, создаём...")
+        if 'users' not in [t['tablename'] for t in tables]:
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1890,32 +1881,25 @@ async def create_admin():
                 )
             ''')
         
-        # Проверяем существование admin
         existing = await conn.fetchrow("SELECT id FROM users WHERE username = 'admin'")
-        
         if existing:
-            # Обновляем пароль
             await conn.execute("UPDATE users SET hashed_password = $1 WHERE username = 'admin'", hashed)
             print("✓ Пароль администратора обновлён")
         else:
-            # Создаём admin
             await conn.execute('''
                 INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser, is_active)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
             ''', 'admin@gochs.local', 'admin', 'Администратор', hashed, 'admin', True, True)
             print("✓ Пользователь admin создан (пароль: Admin123!)")
-            
     except Exception as e:
-        print(f"✗ Ошибка создания пользователя: {e}")
+        print(f"✗ Ошибка: {e}")
     finally:
         await conn.close()
 
 asyncio.run(create_admin())
 PYTHON_SCRIPT
 
-    # Заменяем плейсхолдер пароля в скрипте
-    sed -i "s/PASSWORD_PLACEHOLDER/$POSTGRES_PASSWORD/g" "$INSTALL_DIR/scripts/create_admin.py" 2>/dev/null || true
-    
+    unset DB_PASSWORD
     deactivate 2>/dev/null || true
 
     log_info "Финальные настройки применены"
