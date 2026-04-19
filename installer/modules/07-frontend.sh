@@ -1589,6 +1589,7 @@ build_frontend() {
     
     # Установка прав
     chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/frontend/build" 2>/dev/null || true
+    chown -R www-data:www-data "$INSTALL_DIR/frontend/build"
     chmod -R 755 "$INSTALL_DIR/frontend/build"
     
     cd "$SCRIPT_DIR"
