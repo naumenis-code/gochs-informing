@@ -1834,66 +1834,32 @@ post_install_fixes() {
     systemctl restart gochs-api gochs-worker gochs-scheduler 2>/dev/null || true
     
     # ============================================================
-    # Создание пользователя admin в базе данных
+    # Создание пользователя admin в базе данных (через pgcrypto)
     # ============================================================
     log_info "Создание администратора в базе данных..."
     sleep 3
     
-    source "$INSTALL_DIR/venv/bin/activate"
-    export DB_PASSWORD="$POSTGRES_PASSWORD"
+    # Загружаем пароль из .env если не задан
+    if [[ -z "$POSTGRES_PASSWORD" ]] && [[ -f "$INSTALL_DIR/.env" ]]; then
+        source "$INSTALL_DIR/.env"
+    fi
     
-    python3 << 'PYTHON_SCRIPT'
-import sys, os, asyncio
-sys.path.insert(0, '/opt/gochs-informing')
-
-from passlib.context import CryptContext
-import asyncpg
-
-async def create_admin():
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    hashed = pwd_context.hash("Admin123!")
-    db_password = os.environ.get('DB_PASSWORD', 'gochs_password')
+    # Включаем pgcrypto
+    PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U gochs_user -d gochs -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;" 2>/dev/null
     
-    conn = await asyncpg.connect(host="localhost", database="gochs", user="gochs_user", password=db_password)
+    # Создаём admin через pgcrypto (обходит проблему с bcrypt)
+    PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U gochs_user -d gochs << 'EOF' 2>/dev/null
+INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser, is_active) 
+VALUES ('admin@gochs.local', 'admin', 'Администратор', crypt('Admin123!', gen_salt('bf')), 'admin', TRUE, TRUE) 
+ON CONFLICT (username) DO UPDATE SET hashed_password = crypt('Admin123!', gen_salt('bf'));
+EOF
+
+    if [[ $? -eq 0 ]]; then
+        log_info "✓ Пользователь admin создан (пароль: Admin123!)"
+    else
+        log_warn "⚠ Не удалось создать пользователя admin"
+    fi
     
-    try:
-        tables = await conn.fetch("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
-        if 'users' not in [t['tablename'] for t in tables]:
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    email VARCHAR(255) UNIQUE NOT NULL,
-                    username VARCHAR(100) UNIQUE NOT NULL,
-                    full_name VARCHAR(255) NOT NULL,
-                    hashed_password VARCHAR(255) NOT NULL,
-                    role VARCHAR(50) DEFAULT 'operator',
-                    is_active BOOLEAN DEFAULT TRUE,
-                    is_superuser BOOLEAN DEFAULT FALSE,
-                    last_login TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-        
-        existing = await conn.fetchrow("SELECT id FROM users WHERE username = 'admin'")
-        if existing:
-            await conn.execute("UPDATE users SET hashed_password = $1 WHERE username = 'admin'", hashed)
-            print("✓ Пароль администратора обновлён")
-        else:
-            await conn.execute('''
-                INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser, is_active)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ''', 'admin@gochs.local', 'admin', 'Администратор', hashed, 'admin', True, True)
-            print("✓ Пользователь admin создан (пароль: Admin123!)")
-    except Exception as e:
-        print(f"✗ Ошибка: {e}")
-    finally:
-        await conn.close()
-
-asyncio.run(create_admin())
-PYTHON_SCRIPT
-
-    unset DB_PASSWORD
     deactivate 2>/dev/null || true
 
     log_info "Финальные настройки применены"
