@@ -48,6 +48,14 @@ fi
 
 install() {
     log_step "Применение финальных патчей и исправлений"
+
+      # ЗАГРУЗКА КОНФИГУРАЦИИ
+    if [[ -f "$INSTALL_DIR/.env" ]]; then
+        source "$INSTALL_DIR/.env"
+    fi
+    if [[ -f "${SCRIPT_DIR}/config/config.env" ]]; then
+        source "${SCRIPT_DIR}/config/config.env"
+    fi
     
     # 1. Создание директории логов
     log_info "Проверка директории логов..."
