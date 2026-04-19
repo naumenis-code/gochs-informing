@@ -639,8 +639,7 @@ exten => _X.,1,NoOp(Входящий звонок от ${CALLERID(num)})
  same => n,Playback(${GOCHS_PLAYBOOK_DIR}/welcome)
  same => n,Playback(beep)
  same => n,Set(FILENAME=${STRFTIME(${EPOCH},,%Y%m%d_%H%M%S)}_${CALLERID(num)})
- same => n,MixMonitor(${GOCHS_RECORDING_DIR}/${FILENAME}.wav)
- same => n,Wait(300)
+ same => n,Record(${GOCHS_RECORDING_DIR}/${FILENAME}.wav,10,120,sk)
  same => n,Hangup()
 
 [gochs-outbound]
@@ -820,6 +819,19 @@ start_asterisk() {
         
         # Проверка версии
         asterisk -rx "core show version" 2>/dev/null | head -1
+
+        # Проверка регистрации на FreePBX
+        log_info "Проверка регистрации на FreePBX..."
+        sleep 3
+        if asterisk -rx "pjsip show registrations" 2>/dev/null | grep -q "freepbx.*Registered"; then
+            log_info "✓ Регистрация на FreePBX успешна"
+        else
+            log_warn "✗ Регистрация на FreePBX не удалась"
+            log_warn "  Проверьте настройки в config.env:"
+            log_warn "  FREEPBX_HOST=$FREEPBX_HOST:$FREEPBX_PORT"
+            log_warn "  FREEPBX_EXTENSION=$FREEPBX_EXTENSION"
+            log_warn "  FREEPBX_USERNAME=$FREEPBX_USERNAME"
+        fi
     else
         log_error "Проблема с запуском Asterisk"
         systemctl status asterisk --no-pager -l
@@ -918,40 +930,45 @@ password = $ASTERISK_ARI_PASSWORD
 password_format = plain
 EOF
 
-    # Создание Python скрипта для тестирования AMI
+    # Создание Python скрипта для тестирования AMI (исправлено: socket вместо telnetlib)
     cat > "$INSTALL_DIR/scripts/test_ami.py" << EOF
 #!/usr/bin/env python3
+import socket
 import sys
-import telnetlib
-import time
 
 def test_ami():
     try:
-        tn = telnetlib.Telnet('127.0.0.1', $ASTERISK_AMI_PORT)
+        # Подключение к AMI
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+        sock.connect(('127.0.0.1', $ASTERISK_AMI_PORT))
+        
+        # Читаем приветствие
+        data = sock.recv(1024).decode()
+        if 'Asterisk Call Manager' not in data:
+            print("✗ Не получено приветствие AMI")
+            return False
         
         # Логин
-        tn.read_until(b'Asterisk Call Manager')
-        tn.write(b'Action: Login\r\n')
-        tn.write(b'Username: $ASTERISK_AMI_USER\r\n')
-        tn.write(b'Secret: $ASTERISK_AMI_PASSWORD\r\n')
-        tn.write(b'\r\n')
+        login_cmd = f"Action: Login\r\nUsername: $ASTERISK_AMI_USER\r\nSecret: $ASTERISK_AMI_PASSWORD\r\n\r\n"
+        sock.send(login_cmd.encode())
         
-        response = tn.read_until(b'Response', timeout=5).decode()
-        
+        response = sock.recv(1024).decode()
         if 'Success' in response:
             print("✓ AMI подключение успешно")
             
             # Ping
-            tn.write(b'Action: Ping\r\n\r\n')
-            ping_response = tn.read_until(b'Response', timeout=2).decode()
+            sock.send(b"Action: Ping\r\n\r\n")
+            ping_response = sock.recv(1024).decode()
             if 'Success' in ping_response:
                 print("  Ping: OK")
             
-            tn.write(b'Action: Logoff\r\n\r\n')
-            tn.close()
+            sock.send(b"Action: Logoff\r\n\r\n")
+            sock.close()
             return True
         else:
             print("✗ Ошибка AMI подключения")
+            print(f"  Ответ: {response[:100]}")
             return False
             
     except Exception as e:
