@@ -1660,7 +1660,8 @@ Environment="PATH=$INSTALL_DIR/venv/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
 ExecStart=$INSTALL_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
-RestartSec=10
+RestartSec=5
+TimeoutStartSec=60
 StandardOutput=append:$INSTALL_DIR/logs/api.log
 StandardError=append:$INSTALL_DIR/logs/api_error.log
 
