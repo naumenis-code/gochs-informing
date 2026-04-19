@@ -60,6 +60,9 @@ install() {
     # Создание базы данных и пользователя
     log_info "Создание базы данных и пользователя..."
     create_database_and_user
+
+    # Настройка аутентификации
+    configure_pg_hba
     
     # Создание структуры базы данных
     log_info "Создание структуры базы данных..."
@@ -156,6 +159,8 @@ EOF
 }
 
 create_database_and_user() {
+    log_info "Создание базы данных и пользователя..."
+    
     # Создание пользователя и базы данных
     sudo -u postgres psql << EOF
 -- Удаление существующих объектов (если есть)
@@ -174,18 +179,50 @@ CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER ENCODING 'UTF8' LC_COLLATE 'ru
 -- Создание расширений
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
-CREATE EXTENSION IF NOT EXISTS "btree_gin";
-CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
 
 -- Настройка прав
 GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO $POSTGRES_USER;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $POSTGRES_USER;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $POSTGRES_USER;
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO $POSTGRES_USER;
+GRANT ALL PRIVILEGES ON SCHEMA public TO $POSTGRES_USER;
+ALTER DATABASE $POSTGRES_DB OWNER TO $POSTGRES_USER;
+EOF
 
--- Настройка схемы по умолчанию
-ALTER DATABASE $POSTGRES_DB SET search_path TO public;
-ALTER USER $POSTGRES_USER SET search_path TO public;
+    # Проверка успешности создания
+    if sudo -u postgres psql -c "SELECT 1 FROM pg_database WHERE datname='$POSTGRES_DB'" | grep -q 1; then
+        log_info "База данных $POSTGRES_DB создана успешно"
+    else
+        log_error "Не удалось создать базу данных $POSTGRES_DB"
+        return 1
+    fi
+    
+    if sudo -u postgres psql -c "SELECT 1 FROM pg_roles WHERE rolname='$POSTGRES_USER'" | grep -q 1; then
+        log_info "Пользователь $POSTGRES_USER создан успешно"
+    else
+        log_error "Не удалось создать пользователя $POSTGRES_USER"
+        return 1
+    fi
+}
+
+configure_pg_hba() {
+    log_info "Настройка аутентификации PostgreSQL..."
+    
+    local pg_hba="/etc/postgresql/15/main/pg_hba.conf"
+    
+    # Резервное копирование
+    backup_file "$pg_hba"
+    
+    # Проверить, есть ли уже строка с md5 для localhost
+    if ! grep -q "host.*all.*all.*127.0.0.1/32.*md5" "$pg_hba"; then
+        # Добавить строку для аутентификации по паролю
+        echo "host    all             all             127.0.0.1/32            md5" >> "$pg_hba"
+        log_info "Добавлена md5 аутентификация для localhost"
+    else
+        log_info "md5 аутентификация уже настроена"
+    fi
+    
+    # Перезагрузить PostgreSQL для применения изменений
+    systemctl reload postgresql
+    log_info "PostgreSQL перезагружен"
+}
 
 EOF
 
