@@ -391,6 +391,7 @@ install_asterisk() {
         if ! command -v espeak &> /dev/null; then
             log_info "Установка espeak для синтеза речи..."
             apt-get update -qq
+            apt-get install -y espeak sox 2>/dev/null || true
             apt-get install -y espeak espeak-data 2>/dev/null || {
                 log_warn "Не удалось установить espeak. Пропускаем генерацию аудио."
             }
