@@ -1676,21 +1676,20 @@ EOF
     # gochs-websocket.service
     cat > /etc/systemd/system/gochs-websocket.service << EOF
 [Unit]
-Description=ГО-ЧС WebSocket Service
+Description=ГО-ЧС Celery Worker
 After=network.target redis-server.service
+Wants=redis-server.service
 
 [Service]
 Type=simple
-User=$GOCHS_USER
-Group=$GOCHS_GROUP
-WorkingDirectory=$INSTALL_DIR
-Environment="PATH=$INSTALL_DIR/venv/bin"
-Environment="PYTHONPATH=$INSTALL_DIR"
-ExecStart=$INSTALL_DIR/venv/bin/python -m app.services.websocket.server
+User=gochs
+Group=gochs
+WorkingDirectory=/opt/gochs-informing
+Environment="PATH=/opt/gochs-informing/venv/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/opt/gochs-informing"
+ExecStart=/opt/gochs-informing/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q default
 Restart=always
 RestartSec=10
-StandardOutput=append:$INSTALL_DIR/logs/websocket.log
-StandardError=append:$INSTALL_DIR/logs/websocket_error.log
 
 [Install]
 WantedBy=multi-user.target
