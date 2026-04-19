@@ -170,6 +170,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.api.v1 import api_router
 from app.core.logging_config import setup_logging
+from fastapi import WebSocket, WebSocketDisconnect
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -224,6 +225,40 @@ app = FastAPI(
     redoc_url="/redoc",
     openapi_url="/openapi.json"
 )
+
+# WebSocket поддержка
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        await websocket.send_json({"type": "connected"})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+@app.websocket("/ws/{path:path}")
+async def websocket_path(websocket: WebSocket, path: str):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1731,10 +1766,11 @@ EOF
 post_install_fixes() {
     log_info "Применение финальных настроек..."
     
-    # Пароль Redis в API
+    # Получить пароль Redis и обновить в main.py
     local redis_pass=$(grep requirepass /etc/redis/redis.conf 2>/dev/null | awk '{print $2}')
     if [[ -n "$redis_pass" ]] && [[ -f "$INSTALL_DIR/app/main.py" ]]; then
         sed -i "s/REDIS_PASSWORD = .*/REDIS_PASSWORD = \"$redis_pass\"/" "$INSTALL_DIR/app/main.py"
+        log_info "Пароль Redis добавлен в main.py"
     fi
     
     # Создание пользователя admin если нужно
@@ -1743,8 +1779,8 @@ post_install_fixes() {
         chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/logs"
     fi
     
-    # Исправление прав на директории
-    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR" 2>/dev/null || true
+    # Перезапуск сервисов
+    systemctl restart gochs-api gochs-worker gochs-scheduler 2>/dev/null || true
     
     log_info "Финальные настройки применены"
 }
