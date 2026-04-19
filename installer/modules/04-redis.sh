@@ -148,22 +148,38 @@ install_redis() {
                 return 0
             fi
         fi
-    else
-        # Добавление официального репозитория Redis
-        log_info "Добавление репозитория Redis..."
+    fi
+    
+    # Пробуем официальный репозиторий Redis
+    log_info "Добавление официального репозитория Redis..."
+    
+    local redis_installed=false
+    
+    if curl -fsSL --connect-timeout 10 https://packages.redis.io/gpg 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg 2>/dev/null; then
+        echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs 2>/dev/null || echo 'bookworm') main" > /etc/apt/sources.list.d/redis.list
         
-        if curl -fsSL https://packages.redis.io/gpg 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg 2>/dev/null; then
-            echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs 2>/dev/null || echo 'bookworm') main" > /etc/apt/sources.list.d/redis.list
-            apt-get update -qq
-            apt-get install -y redis-server redis-tools
+        log_info "Официальный репозиторий добавлен, установка Redis..."
+        if apt-get update -qq 2>/dev/null && apt-get install -y redis-server redis-tools 2>/dev/null; then
+            redis_installed=true
+            log_info "✅ Redis установлен из официального репозитория"
         else
-            # Fallback на стандартный репозиторий Debian
-            log_warn "Не удалось добавить официальный репозиторий Redis, используется стандартный"
-            apt-get update -qq
-            apt-get install -y redis-server redis-tools
+            log_warn "Не удалось установить Redis из официального репозитория"
+            rm -f /etc/apt/sources.list.d/redis.list
         fi
-        
-        log_info "Redis установлен"
+    else
+        log_warn "Не удалось подключиться к официальному репозиторию Redis"
+    fi
+    
+    # Fallback на стандартный репозиторий Debian
+    if [[ "$redis_installed" != "true" ]]; then
+        log_info "Установка Redis из стандартного репозитория Debian..."
+        rm -f /etc/apt/sources.list.d/redis.list 2>/dev/null
+        apt-get update -qq
+        apt-get install -y redis-server redis-tools || {
+            log_error "Не удалось установить Redis"
+            return 1
+        }
+        log_info "✅ Redis установлен из стандартного репозитория Debian"
     fi
 }
 
