@@ -87,7 +87,7 @@ cryptography==41.0.7
 # ------------------------------------------------------------------------------
 pyst2==0.5.1
 py-asterisk==0.5.20
-panoramisk==1.4.1
+panoramisk==1.4
 aioari==0.3.2
 websocket-client==1.6.4
 
