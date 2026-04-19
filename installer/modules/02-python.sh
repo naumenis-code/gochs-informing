@@ -176,6 +176,7 @@ EOF
     pip install email-validator python-multipart python-jose[cryptography] passlib[bcrypt] --quiet
     pip install pyst2==0.5.1 py-asterisk==0.5.20 --quiet
     pip install asyncpg psycopg2-binary --quiet
+    pip install --force-reinstall email-validator bcrypt==4.0.1 passlib==1.7.4 --quiet
     pip install email-validator
     log_info "Критические пакеты установлены"
 
