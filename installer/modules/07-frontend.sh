@@ -203,7 +203,7 @@ create_config_files() {
     "sass": "^1.69.5",
     "eslint": "^8.55.0",
     "eslint-plugin-react": "^7.33.2",
-    "prettier": "^3.1.1"
+    "prettier": "^3.1.1",
     "terser": "^5.37.0"
   },
   "scripts": {
