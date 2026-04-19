@@ -86,6 +86,8 @@ else
     ASTERISK_AMI_USER="${ASTERISK_AMI_USER:-gochs_ami}"
     ASTERISK_AMI_PASSWORD="${ASTERISK_AMI_PASSWORD:-$(generate_password)}"
     ASTERISK_ARI_PASSWORD="${ASTERISK_ARI_PASSWORD:-$(generate_password)}"
+    ASTERISK_ADMIN_PASSWORD="${ASTERISK_ADMIN_PASSWORD:-$(generate_password)}"
+    ASTERISK_MONITOR_PASSWORD="${ASTERISK_MONITOR_PASSWORD:-$(generate_password)}"
     GOCHS_USER="${GOCHS_USER:-gochs}"
     GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 fi
