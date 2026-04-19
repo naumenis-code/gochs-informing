@@ -290,17 +290,7 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Проверка здоровья системы"""
-    health_status = {
-        "status": "healthy",
-        "database": True,
-        "redis": True,
-        "asterisk": True
-    }
-    return health_status
-
-
-@app.get("/health")
-async def health_check():
+    from sqlalchemy import text
     health_status = {
         "status": "healthy",
         "database": False,
@@ -308,7 +298,7 @@ async def health_check():
         "asterisk": False
     }
     
-       # Проверка PostgreSQL
+    # Проверка PostgreSQL
     try:
         from app.core.database import engine
         async with engine.connect() as conn:
@@ -319,14 +309,15 @@ async def health_check():
 
     # Проверка Redis
     try:
-        import redis
+        import redis.asyncio as redis
         r = redis.Redis(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
             password=settings.REDIS_PASSWORD,
             socket_connect_timeout=2
         )
-        r.ping()
+        await r.ping()
+        await r.close()
         health_status["redis"] = True
     except Exception as e:
         logger.error(f"Redis error: {e}")
@@ -339,17 +330,18 @@ async def health_check():
     except Exception as e:
         logger.error(f"Asterisk error: {e}")
 
+    # Общий статус
+    if not all([health_status["database"], health_status["redis"]]):
+        health_status["status"] = "degraded"
+
     return health_status
+
 
 @app.get("/api/health")
 async def api_health():
-    """Эндпоинт для фронтенда"""
-    return {
-        "status": "healthy",
-        "database": True,
-        "redis": True,
-        "asterisk": True
-    }
+    """Эндпоинт для фронтенда (упрощённый)"""
+    return {"status": "ok"}
+
 
 if __name__ == "__main__":
     import uvicorn
@@ -1466,6 +1458,22 @@ def cleanup_old_recordings(days: int = 90):
     return {"status": "completed", "deleted": 0}
 EOF
 
+    # tasks __init__.py
+    cat > "$INSTALL_DIR/app/tasks/__init__.py" << 'EOF'
+#!/usr/bin/env python3
+"""Celery задачи"""
+
+from app.tasks.celery_app import celery_app
+
+# Импортируем задачи чтобы они зарегистрировались в Celery
+from app.tasks import dialer_tasks
+from app.tasks import tts_tasks
+from app.tasks import stt_tasks
+from app.tasks import cleanup_tasks
+
+__all__ = ["celery_app"]
+EOF
+
     log_info "Celery задачи созданы"
 }
 
@@ -1672,6 +1680,33 @@ StandardError=append:$INSTALL_DIR/logs/api_error.log
 WantedBy=multi-user.target
 EOF
 
+    # gochs-worker.service (Celery worker) - ИСПРАВЛЕНО: создаётся корректно
+    cat > /etc/systemd/system/gochs-worker.service << EOF
+[Unit]
+Description=ГО-ЧС Celery Worker
+After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
+
+[Service]
+Type=forking
+User=$GOCHS_USER
+Group=$GOCHS_GROUP
+WorkingDirectory=$INSTALL_DIR
+Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=$INSTALL_DIR"
+ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4 --pidfile=/run/gochs-worker.pid --logfile=$INSTALL_DIR/logs/worker.log
+ExecStop=/bin/kill -s TERM \$MAINPID
+Restart=always
+RestartSec=10
+TimeoutStartSec=30
+TimeoutStopSec=30
+PIDFile=/run/gochs-worker.pid
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     # gochs-scheduler.service
     cat > /etc/systemd/system/gochs-scheduler.service << EOF
 [Unit]
@@ -1696,29 +1731,9 @@ StandardError=append:$INSTALL_DIR/logs/scheduler_error.log
 WantedBy=multi-user.target
 EOF
 
-    # gochs-websocket.service
-    cat > /etc/systemd/system/gochs-websocket.service << EOF
-[Unit]
-Description=ГО-ЧС Celery Worker
-After=network.target redis-server.service
-Wants=redis-server.service
-
-[Service]
-Type=simple
-User=$GOCHS_USER
-Group=$GOCHS_GROUP
-WorkingDirectory=$INSTALL_DIR
-Environment="PATH=$INSTALL_DIR/venv/bin"
-Environment="PYTHONPATH=$INSTALL_DIR"
-ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q default
-Restart=always
-RestartSec=10
-StandardOutput=append:$INSTALL_DIR/logs/worker.log
-StandardError=append:$INSTALL_DIR/logs/worker_error.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    # Создаем директорию для PID файла
+    mkdir -p /run/gochs
+    chown "$GOCHS_USER:$GOCHS_GROUP" /run/gochs 2>/dev/null || true
 
     systemctl daemon-reload
     log_info "Systemd службы созданы"
@@ -1727,19 +1742,43 @@ EOF
 start_services() {
     log_info "Запуск служб бэкенда..."
     
-    systemctl enable gochs-api.service gochs-worker.service gochs-scheduler.service
+    # Перезагружаем systemd
+    systemctl daemon-reload
     
-    systemctl start gochs-api.service
-    systemctl start gochs-worker.service
-    systemctl start gochs-scheduler.service
+    # Включаем и запускаем API
+    systemctl enable gochs-api.service
+    systemctl restart gochs-api.service
     
-    wait_for_service "gochs-api" 10
-    
+    # Ждём запуска API
+    sleep 5
     if systemctl is-active --quiet gochs-api.service; then
-        log_info "API сервис запущен"
+        log_info "✓ API сервис запущен"
     else
-        log_error "Ошибка запуска API сервиса"
-        journalctl -u gochs-api --no-pager -n 20
+        log_error "✗ API сервис не запустился"
+        journalctl -u gochs-api --no-pager -n 30
+    fi
+    
+    # Включаем и запускаем Worker
+    systemctl enable gochs-worker.service
+    systemctl restart gochs-worker.service
+    sleep 3
+    
+    if systemctl is-active --quiet gochs-worker.service; then
+        log_info "✓ Worker сервис запущен"
+    else
+        log_warn "✗ Worker сервис не запустился"
+        log_info "Проверьте логи: journalctl -u gochs-worker"
+    fi
+    
+    # Включаем и запускаем Scheduler
+    systemctl enable gochs-scheduler.service
+    systemctl restart gochs-scheduler.service
+    sleep 2
+    
+    if systemctl is-active --quiet gochs-scheduler.service; then
+        log_info "✓ Scheduler сервис запущен"
+    else
+        log_warn "✗ Scheduler сервис не запустился"
     fi
 }
 
@@ -1811,6 +1850,86 @@ post_install_fixes() {
     # Перезапуск сервисов
     systemctl restart gochs-api gochs-worker gochs-scheduler 2>/dev/null || true
     
+    # ============================================================
+    # Создание пользователя admin в базе данных
+    # ============================================================
+    log_info "Создание администратора в базе данных..."
+    
+    # Ждём готовности БД
+    sleep 3
+    
+    # Создаём пользователя через Python
+    source "$INSTALL_DIR/venv/bin/activate"
+    python3 << 'PYTHON_SCRIPT'
+import sys
+sys.path.insert(0, '/opt/gochs-informing')
+
+import asyncio
+from passlib.context import CryptContext
+import asyncpg
+
+async def create_admin():
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    hashed = pwd_context.hash("Admin123!")
+    
+    conn = await asyncpg.connect(
+        host="localhost",
+        database="gochs",
+        user="gochs_user",
+        password="PASSWORD_PLACEHOLDER"
+    )
+    
+    try:
+        # Проверяем существование таблицы users
+        tables = await conn.fetch("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        table_names = [t['tablename'] for t in tables]
+        
+        if 'users' not in table_names:
+            print("⚠ Таблица users не найдена, создаём...")
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    username VARCHAR(100) UNIQUE NOT NULL,
+                    full_name VARCHAR(255) NOT NULL,
+                    hashed_password VARCHAR(255) NOT NULL,
+                    role VARCHAR(50) DEFAULT 'operator',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    is_superuser BOOLEAN DEFAULT FALSE,
+                    last_login TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+        
+        # Проверяем существование admin
+        existing = await conn.fetchrow("SELECT id FROM users WHERE username = 'admin'")
+        
+        if existing:
+            # Обновляем пароль
+            await conn.execute("UPDATE users SET hashed_password = $1 WHERE username = 'admin'", hashed)
+            print("✓ Пароль администратора обновлён")
+        else:
+            # Создаём admin
+            await conn.execute('''
+                INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser, is_active)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ''', 'admin@gochs.local', 'admin', 'Администратор', hashed, 'admin', True, True)
+            print("✓ Пользователь admin создан (пароль: Admin123!)")
+            
+    except Exception as e:
+        print(f"✗ Ошибка создания пользователя: {e}")
+    finally:
+        await conn.close()
+
+asyncio.run(create_admin())
+PYTHON_SCRIPT
+
+    # Заменяем плейсхолдер пароля в скрипте
+    sed -i "s/PASSWORD_PLACEHOLDER/$POSTGRES_PASSWORD/g" "$INSTALL_DIR/scripts/create_admin.py" 2>/dev/null || true
+    
+    deactivate 2>/dev/null || true
+
     log_info "Финальные настройки применены"
 }
 
