@@ -409,32 +409,17 @@ server {
     ssl_certificate_key /etc/nginx/ssl/gochs.key;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
     
     root /opt/gochs-informing/frontend/build;
     index index.html;
     
-    access_log /var/log/nginx/gochs-access.log json;
-    error_log /var/log/nginx/gochs-error.log;
-    
-    # API прокси
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000/;
+    location /api {
+        proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        proxy_buffering off;
     }
     
     location /health {
@@ -445,17 +430,6 @@ server {
     
     location /docs {
         proxy_pass http://127.0.0.1:8000/docs;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-    
-    location /redoc {
-        proxy_pass http://127.0.0.1:8000/redoc;
-        proxy_set_header Host $host;
-    }
-    
-    location /openapi.json {
-        proxy_pass http://127.0.0.1:8000/openapi.json;
         proxy_set_header Host $host;
     }
     
@@ -469,30 +443,8 @@ server {
         proxy_read_timeout 86400;
     }
     
-    location /recordings {
-        alias /opt/gochs-informing/recordings;
-        add_header Accept-Ranges bytes;
-        add_header Access-Control-Allow-Origin *;
-    }
-    
-    location /nginx_status {
-        stub_status on;
-        access_log off;
-        allow 127.0.0.1;
-        deny all;
-    }
-    
     location / {
         try_files $uri $uri/ /index.html;
-        
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-    }
-    
-    location ~ /\. {
-        deny all;
     }
 }
 EOF
