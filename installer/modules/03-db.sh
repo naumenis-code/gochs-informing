@@ -19,6 +19,23 @@ if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
 fi
 
+# Fallback: загрузка из .env
+if [[ -z "$POSTGRES_PASSWORD" ]] && [[ -f "$INSTALL_DIR/.env" ]]; then
+    source "$INSTALL_DIR/.env"
+fi
+
+# Fallback: парсинг из credentials
+if [[ -z "$POSTGRES_PASSWORD" ]] && [[ -f "/root/.gochs_credentials" ]]; then
+    POSTGRES_PASSWORD=$(grep -oP 'Пароль: \K.*' /root/.gochs_credentials | head -1)
+fi
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+POSTGRES_DB="${POSTGRES_DB:-gochs}"
+POSTGRES_USER="${POSTGRES_USER:-gochs_user}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generate_password)}"
+GOCHS_USER="${GOCHS_USER:-gochs}"
+GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
+
 MODULE_NAME="03-db"
 MODULE_DESCRIPTION="PostgreSQL база данных"
 
