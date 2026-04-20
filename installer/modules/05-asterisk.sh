@@ -791,24 +791,17 @@ configure_systemd() {
     cat > /etc/systemd/system/asterisk.service << 'EOF'
 [Unit]
 Description=Asterisk PBX
-Documentation=man:asterisk(8)
 After=network.target
-Wants=network.target
 
 [Service]
 Type=forking
-Environment=HOME=/var/lib/asterisk
-WorkingDirectory=/var/lib/asterisk
 User=asterisk
 Group=asterisk
-ExecStart=/usr/sbin/asterisk -g -f -U asterisk -G asterisk
+ExecStart=/usr/sbin/asterisk -g -f -p -U asterisk -G asterisk
 ExecStop=/usr/sbin/asterisk -rx 'core stop gracefully'
 ExecReload=/usr/sbin/asterisk -rx 'core reload'
 Restart=on-failure
 RestartSec=10
-LimitNOFILE=65536
-LimitNPROC=32768
-UMask=0007
 
 [Install]
 WantedBy=multi-user.target
