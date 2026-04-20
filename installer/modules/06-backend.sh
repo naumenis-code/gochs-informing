@@ -125,6 +125,7 @@ install_python_packages() {
     pip install httpx aiohttp requests --quiet
     pip install python-dateutil pytz click pyyaml --quiet
     pip install pyst2 py-asterisk panoramisk --quiet
+    pip install bcrypt==4.0.1 passlib==1.7.4 --force-reinstall --quiet
     
     deactivate
     log_info "Python пакеты установлены"
@@ -1713,7 +1714,7 @@ Group=$GOCHS_GROUP
 WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
-ExecStart=/bin/bash -c 'cd $INSTALL_DIR && source venv/bin/activate && celery -A app.tasks.celery_app beat --loglevel=info'
+ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app beat --loglevel=info
 Restart=on-failure
 RestartSec=30
 KillMode=control-group
