@@ -308,3 +308,32 @@ case "${1:-}" in
         exit 1
         ;;
 esac
+
+# Проверка и исправление прав на таблицы PostgreSQL
+log_info "Проверка прав PostgreSQL..."
+PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $POSTGRES_USER;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $POSTGRES_USER;
+ALTER SCHEMA public OWNER TO $POSTGRES_USER;
+" 2>/dev/null
+log_info "✓ Права PostgreSQL проверены"
+
+# Проверка, что admin существует и пароль рабочий
+ADMIN_CHECK=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "SELECT COUNT(*) FROM users WHERE username='admin';" 2>/dev/null | xargs)
+if [[ "$ADMIN_CHECK" == "0" ]] || [[ -z "$ADMIN_CHECK" ]]; then
+    log_warn "⚠ Пользователь admin не найден, создаём..."
+    # Создаём через Python
+    source "$INSTALL_DIR/venv/bin/activate"
+    ADMIN_HASH=$(python3 -c "
+import sys
+sys.path.insert(0, '$INSTALL_DIR')
+from app.core.security import get_password_hash
+print(get_password_hash('Admin123!'))
+")
+    deactivate
+    PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+    INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser, is_active) 
+    VALUES ('admin@gochs.local', 'admin', 'Администратор', '$ADMIN_HASH', 'admin', TRUE, TRUE);
+    " 2>/dev/null
+    log_info "✓ Пользователь admin создан"
+fi
