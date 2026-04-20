@@ -74,23 +74,35 @@ MODULE_DESCRIPTION="Asterisk 20 LTS - ядро телефонии"
 CONFIG_FILE="${SCRIPT_DIR}/config/config.env"
 if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
-else
-    INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
-    DOMAIN_OR_IP="${DOMAIN_OR_IP:-localhost}"
-    FREEPBX_HOST="${FREEPBX_HOST:-192.168.1.10}"
-    FREEPBX_PORT="${FREEPBX_PORT:-5060}"
-    FREEPBX_EXTENSION="${FREEPBX_EXTENSION:-gochs}"
-    FREEPBX_USERNAME="${FREEPBX_USERNAME:-gochs}"
-    FREEPBX_PASSWORD="${FREEPBX_PASSWORD:-changeme}"
-    ASTERISK_AMI_PORT="${ASTERISK_AMI_PORT:-5038}"
-    ASTERISK_AMI_USER="${ASTERISK_AMI_USER:-gochs_ami}"
-    ASTERISK_AMI_PASSWORD="${ASTERISK_AMI_PASSWORD:-$(generate_password)}"
-    ASTERISK_ARI_PASSWORD="${ASTERISK_ARI_PASSWORD:-$(generate_password)}"
-    ASTERISK_ADMIN_PASSWORD="${ASTERISK_ADMIN_PASSWORD:-$(generate_password)}"
-    ASTERISK_MONITOR_PASSWORD="${ASTERISK_MONITOR_PASSWORD:-$(generate_password)}"
-    GOCHS_USER="${GOCHS_USER:-gochs}"
-    GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 fi
+
+# Fallback: загрузка из .env
+if [[ -z "$ASTERISK_AMI_PASSWORD" ]] && [[ -f "$INSTALL_DIR/.env" ]]; then
+    source "$INSTALL_DIR/.env"
+fi
+
+# Fallback: парсинг из credentials
+if [[ -z "$ASTERISK_AMI_PASSWORD" ]] && [[ -f "/root/.gochs_credentials" ]]; then
+    ASTERISK_AMI_PASSWORD=$(grep -A 3 "ASTERISK:" /root/.gochs_credentials | grep "AMI пароль:" | grep -oP 'AMI пароль: \K.*')
+    ASTERISK_ARI_PASSWORD=$(grep -A 3 "ASTERISK:" /root/.gochs_credentials | grep "ARI пароль:" | grep -oP 'ARI пароль: \K.*')
+    FREEPBX_PASSWORD=$(grep -A 4 "FREE PBX:" /root/.gochs_credentials | grep "Пароль:" | grep -oP 'Пароль: \K.*')
+fi
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+DOMAIN_OR_IP="${DOMAIN_OR_IP:-localhost}"
+FREEPBX_HOST="${FREEPBX_HOST:-192.168.1.10}"
+FREEPBX_PORT="${FREEPBX_PORT:-5060}"
+FREEPBX_EXTENSION="${FREEPBX_EXTENSION:-gochs}"
+FREEPBX_USERNAME="${FREEPBX_USERNAME:-gochs}"
+FREEPBX_PASSWORD="${FREEPBX_PASSWORD:-changeme}"
+ASTERISK_AMI_PORT="${ASTERISK_AMI_PORT:-5038}"
+ASTERISK_AMI_USER="${ASTERISK_AMI_USER:-gochs_ami}"
+ASTERISK_AMI_PASSWORD="${ASTERISK_AMI_PASSWORD:-$(generate_password)}"
+ASTERISK_ARI_PASSWORD="${ASTERISK_ARI_PASSWORD:-$(generate_password)}"
+ASTERISK_ADMIN_PASSWORD="${ASTERISK_ADMIN_PASSWORD:-$(generate_password)}"
+ASTERISK_MONITOR_PASSWORD="${ASTERISK_MONITOR_PASSWORD:-$(generate_password)}"
+GOCHS_USER="${GOCHS_USER:-gochs}"
+GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 
 # Версия Asterisk
 ASTERISK_VERSION="20"
