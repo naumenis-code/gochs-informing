@@ -138,11 +138,11 @@ EOF
         fi
     fi
     
-    # 7.5. Исправление gochs-scheduler.service
-    log_info "Проверка gochs-scheduler.service..."
-    if ! systemctl is-active --quiet gochs-scheduler 2>/dev/null; then
-        log_info "Исправление конфигурации gochs-scheduler.service..."
-        cat > /etc/systemd/system/gochs-scheduler.service << EOF
+ # 7.5. Исправление gochs-scheduler.service
+log_info "Проверка gochs-scheduler.service..."
+if ! systemctl is-active --quiet gochs-scheduler 2>/dev/null; then
+    log_info "Исправление конфигурации gochs-scheduler.service..."
+    cat > /etc/systemd/system/gochs-scheduler.service << EOF
 [Unit]
 Description=ГО-ЧС Celery Beat Scheduler
 After=network.target redis-server.service
@@ -155,7 +155,7 @@ Group=$GOCHS_GROUP
 WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
-ExecStart=/bin/bash -c 'cd $INSTALL_DIR && source venv/bin/activate && celery -A app.tasks.celery_app beat --loglevel=info'
+ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app beat --loglevel=info
 Restart=on-failure
 RestartSec=30
 KillMode=control-group
@@ -166,12 +166,12 @@ StandardError=append:$INSTALL_DIR/logs/scheduler_error.log
 [Install]
 WantedBy=multi-user.target
 EOF
-        systemctl daemon-reload
-        systemctl restart gochs-scheduler
-        log_info "✓ gochs-scheduler.service исправлен"
-    else
-        log_info "✓ gochs-scheduler.service работает"
-    fi
+    systemctl daemon-reload
+    systemctl restart gochs-scheduler
+    log_info "✓ gochs-scheduler.service исправлен"
+else
+    log_info "✓ gochs-scheduler.service работает"
+fi
     
     # 8. Исправление gochs-api.service (таймаут)
     log_info "Проверка gochs-api.service..."
