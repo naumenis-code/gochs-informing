@@ -1857,14 +1857,14 @@ post_install_fixes() {
         source "$INSTALL_DIR/.env"
     fi
     
+    
     # Включаем pgcrypto
     PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U gochs_user -d gochs -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;" 2>/dev/null
     
     # Создаём admin через pgcrypto (обходит проблему с bcrypt)
     PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U gochs_user -d gochs << 'EOF' 2>/dev/null
-INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser, is_active) 
-VALUES ('admin@gochs.local', 'admin', 'Администратор', crypt('Admin123!', gen_salt('bf')), 'admin', TRUE, TRUE) 
-ON CONFLICT (username) DO UPDATE SET hashed_password = crypt('Admin123!', gen_salt('bf'));
+    from app.core.security import get_password_hash
+    hashed = get_password_hash("Admin123!")
 EOF
 
     if [[ $? -eq 0 ]]; then
