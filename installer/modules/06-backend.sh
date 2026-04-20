@@ -995,7 +995,7 @@ class AsteriskService:
         if not self.connected:
             return False
         try:
-            response = self.manager.Hangup(channel))
+            response = self.manager.Hangup(channel)
             return response and response.get('Response') == 'Success'
         except:
             return False
