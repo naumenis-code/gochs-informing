@@ -36,18 +36,19 @@ if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
 fi
 
-# Fallback: загрузка из .env если пароли всё ещё не заданы
+# Fallback: загрузка из .env
 if [[ -z "$POSTGRES_PASSWORD" ]] && [[ -f "$INSTALL_DIR/.env" ]]; then
     source "$INSTALL_DIR/.env"
 fi
 
-# Fallback: загрузка из /root/.gochs_credentials (парсим)
+# Fallback: парсинг из credentials
 if [[ -z "$POSTGRES_PASSWORD" ]] && [[ -f "/root/.gochs_credentials" ]]; then
     POSTGRES_PASSWORD=$(grep -oP 'Пароль: \K.*' /root/.gochs_credentials | head -1)
     REDIS_PASSWORD=$(grep -A 2 "REDIS:" /root/.gochs_credentials | grep -oP 'Пароль: \K.*')
+    ASTERISK_AMI_PASSWORD=$(grep -A 3 "ASTERISK:" /root/.gochs_credentials | grep "AMI пароль:" | grep -oP 'AMI пароль: \K.*')
+    ASTERISK_ARI_PASSWORD=$(grep -A 3 "ASTERISK:" /root/.gochs_credentials | grep "ARI пароль:" | grep -oP 'ARI пароль: \K.*')
 fi
 
-# Только если всё ещё не заданы - генерировать новые
 INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
 DOMAIN_OR_IP="${DOMAIN_OR_IP:-localhost}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generate_password)}"
@@ -58,6 +59,7 @@ GOCHS_USER="${GOCHS_USER:-gochs}"
 GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 SECRET_KEY="${SECRET_KEY:-$(generate_password 32)}"
 JWT_SECRET_KEY="${JWT_SECRET_KEY:-$(generate_password 32)}"
+
 install() {
     log_step "Установка FastAPI бэкенда"
     
