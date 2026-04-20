@@ -1717,9 +1717,11 @@ Group=$GOCHS_GROUP
 WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
-ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app beat --loglevel=info
-Restart=always
-RestartSec=10
+ExecStart=/bin/bash -c 'cd $INSTALL_DIR && source venv/bin/activate && celery -A app.tasks.celery_app beat --loglevel=info'
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=30
 StandardOutput=append:$INSTALL_DIR/logs/scheduler.log
 StandardError=append:$INSTALL_DIR/logs/scheduler_error.log
 
@@ -1861,10 +1863,21 @@ post_install_fixes() {
     # Включаем pgcrypto
     PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U gochs_user -d gochs -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;" 2>/dev/null
     
-    # Создаём admin через pgcrypto (обходит проблему с bcrypt)
-    PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U gochs_user -d gochs << 'EOF' 2>/dev/null
-    from app.core.security import get_password_hash
-    hashed = get_password_hash("Admin123!")
+    # Генерируем хеш пароля через Python
+    source "$INSTALL_DIR/venv/bin/activate"
+    ADMIN_HASH=$(python3 -c "
+import sys
+sys.path.insert(0, '$INSTALL_DIR')
+from app.core.security import get_password_hash
+print(get_password_hash('Admin123!'))
+")
+    deactivate
+    
+    # Вставляем admin с правильным хешем
+    PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U gochs_user -d gochs << EOF 2>/dev/null
+INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser, is_active) 
+VALUES ('admin@gochs.local', 'admin', 'Администратор', '$ADMIN_HASH', 'admin', TRUE, TRUE) 
+ON CONFLICT (username) DO UPDATE SET hashed_password = '$ADMIN_HASH';
 EOF
 
     if [[ $? -eq 0 ]]; then
