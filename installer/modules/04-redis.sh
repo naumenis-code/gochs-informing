@@ -82,12 +82,24 @@ MODULE_DESCRIPTION="Redis для очередей задач и кэширова
 CONFIG_FILE="${SCRIPT_DIR}/config/config.env"
 if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
-else
-    INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
-    REDIS_PORT="${REDIS_PORT:-6379}"
-    REDIS_PASSWORD="${REDIS_PASSWORD:-$(generate_password)}"
-    REDIS_MAXMEMORY="${REDIS_MAXMEMORY:-512mb}"
 fi
+
+# Fallback: загрузка из .env
+if [[ -z "$REDIS_PASSWORD" ]] && [[ -f "$INSTALL_DIR/.env" ]]; then
+    source "$INSTALL_DIR/.env"
+fi
+
+# Fallback: парсинг из credentials
+if [[ -z "$REDIS_PASSWORD" ]] && [[ -f "/root/.gochs_credentials" ]]; then
+    REDIS_PASSWORD=$(grep -A 2 "REDIS:" /root/.gochs_credentials | grep -oP 'Пароль: \K.*')
+fi
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-$(generate_password)}"
+REDIS_MAXMEMORY="${REDIS_MAXMEMORY:-512mb}"
+GOCHS_USER="${GOCHS_USER:-gochs}"
+GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 
 install() {
     log_step "Установка и настройка Redis"
