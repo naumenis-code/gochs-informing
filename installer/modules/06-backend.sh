@@ -941,7 +941,7 @@ class AsteriskService:
                 settings.ASTERISK_AMI_USER,
                 settings.ASTERISK_AMI_PASSWORD
             )
-            response = self.manager.send_action({'Action': 'Ping'})
+            response = self.manager.Ping()
             if response and response.get('Response') == 'Success':
                 self.connected = True
                 logger.info("Connected to Asterisk AMI")
@@ -984,7 +984,7 @@ class AsteriskService:
                 'Timeout': str(timeout * 1000),
                 'Async': 'true'
             }
-            response = self.manager.send_action(action)
+            response = self.manager.Originate(...)
             if response and response.get('Response') == 'Success':
                 return response.get('UniqueID')
         except Exception as e:
@@ -995,7 +995,7 @@ class AsteriskService:
         if not self.connected:
             return False
         try:
-            response = self.manager.send_action({'Action': 'Hangup', 'Channel': channel})
+            response = self.manager.Hangup(channel))
             return response and response.get('Response') == 'Success'
         except:
             return False
