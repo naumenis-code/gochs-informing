@@ -920,7 +920,6 @@ create_services() {
 #!/usr/bin/env python3
 """Сервис для работы с Asterisk"""
 
-import asyncio
 import logging
 from typing import Optional, Dict, Any, List
 from app.core.config import settings
@@ -931,7 +930,6 @@ class AsteriskService:
     def __init__(self):
         self.manager = None
         self.connected = False
-        self.event_handlers = {}
     
     async def connect(self):
         try:
@@ -973,18 +971,16 @@ class AsteriskService:
             return None
         
         try:
-            action = {
-                'Action': 'Originate',
-                'Channel': f'PJSIP/{destination}@freepbx-endpoint',
-                'CallerID': caller_id,
-                'Context': 'gochs-dialer',
-                'Exten': 's',
-                'Priority': 1,
-                'Variable': f'SCENARIO_ID={scenario_id},CALL_ID={call_id}',
-                'Timeout': str(timeout * 1000),
-                'Async': 'true'
-            }
-            response = self.manager.Originate(...)
+            response = self.manager.Originate(
+                f'PJSIP/{destination}@freepbx-endpoint',
+                extension='s',
+                context='gochs-dialer',
+                priority=1,
+                timeout=timeout * 1000,
+                caller_id=caller_id,
+                variable={'SCENARIO_ID': scenario_id, 'CALL_ID': call_id},
+                async_=True
+            )
             if response and response.get('Response') == 'Success':
                 return response.get('UniqueID')
         except Exception as e:
@@ -995,7 +991,7 @@ class AsteriskService:
         if not self.connected:
             return False
         try:
-            response = self.manager.Hangup(channel)
+            response = self.manager.Hangup(channel)  # ← УБРАНА ЛИШНЯЯ СКОБКА
             return response and response.get('Response') == 'Success'
         except:
             return False
@@ -1004,7 +1000,7 @@ class AsteriskService:
         if not self.connected:
             return []
         try:
-            response = self.manager.send_action({'Action': 'CoreShowChannels'})
+            response = self.manager.CoreShowChannels()
             channels = []
             if response:
                 for key, value in response.items():
@@ -1935,6 +1931,12 @@ check_status() {
     
     return $status
 }
+
+    # Исправляем права для пользователя gochs
+    log_info "Настройка прав доступа..."
+    chown -R $GOCHS_USER:$GOCHS_GROUP "$INSTALL_DIR"
+    chmod -R 755 "$INSTALL_DIR"
+    log_info "✓ Права доступа настроены"
 
 # Обработка аргументов
 case "${1:-}" in
