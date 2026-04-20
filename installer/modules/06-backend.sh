@@ -1882,6 +1882,12 @@ EOF
         log_warn "⚠ Не удалось создать пользователя admin"
     fi
     
+    # Исправляем права для пользователя gochs
+    log_info "Настройка прав доступа..."
+    chown -R $GOCHS_USER:$GOCHS_GROUP "$INSTALL_DIR"
+    chmod -R 755 "$INSTALL_DIR"
+    log_info "✓ Права доступа настроены"
+
     deactivate 2>/dev/null || true
 
     log_info "Финальные настройки применены"
@@ -1931,12 +1937,6 @@ check_status() {
     
     return $status
 }
-
-    # Исправляем права для пользователя gochs
-    log_info "Настройка прав доступа..."
-    chown -R $GOCHS_USER:$GOCHS_GROUP "$INSTALL_DIR"
-    chmod -R 755 "$INSTALL_DIR"
-    log_info "✓ Права доступа настроены"
 
 # Обработка аргументов
 case "${1:-}" in
