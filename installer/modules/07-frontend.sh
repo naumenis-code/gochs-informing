@@ -49,12 +49,17 @@ MODULE_DESCRIPTION="React Frontend для ГО-ЧС Информирование
 CONFIG_FILE="${SCRIPT_DIR}/config/config.env"
 if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
-else
-    INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
-    DOMAIN_OR_IP="${DOMAIN_OR_IP:-192.168.0.166}"
-    GOCHS_USER="${GOCHS_USER:-gochs}"
-    GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 fi
+
+# Fallback: загрузка из .env
+if [[ -z "$DOMAIN_OR_IP" ]] && [[ -f "$INSTALL_DIR/.env" ]]; then
+    source "$INSTALL_DIR/.env"
+fi
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+DOMAIN_OR_IP="${DOMAIN_OR_IP:-192.168.0.166}"
+GOCHS_USER="${GOCHS_USER:-gochs}"
+GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 
 # Версия Node.js
 NODE_VERSION="20"
