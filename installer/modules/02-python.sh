@@ -187,6 +187,13 @@ flake8>=6.1.0,<8.0.0
 mypy>=1.7.0,<2.0.0
 ipython>=8.18.0,<9.0.0
 EOF
+    # Настройка pip на использование зеркала (для обхода блокировок/ускорения)
+    log_info "Настройка pip на использование зеркала Яндекса..."
+    pip config set global.index-url https://mirror.yandex.ru/pypi/simple/
+    pip config set global.trusted-host mirror.yandex.ru
+    
+    # Увеличиваем таймаут по умолчанию для надежности
+    export PIP_DEFAULT_TIMEOUT=120
 
     # Установка зависимостей с умным подбором версий
     log_info "Установка Python пакетов (умный подбор версий)..."
@@ -241,12 +248,15 @@ EOF
     
     log_info "Установленные версии сохранены в requirements.lock"
     
-    # Установка PyTorch с умным подбором версии
+    # Установка PyTorch (попытка с зеркалом или основного репозитория)
     log_info "Установка PyTorch..."
-    # Экранируем версии, чтобы bash не пытался их интерпретировать
-    if ! pip install 'torch>=2.0.0,<3.0.0' 'torchaudio>=2.0.0,<3.0.0' --index-url https://download.pytorch.org/whl/cpu 2>/dev/null; then
-        log_warn "Не удалось установить PyTorch с ограничениями, пробуем последнюю версию..."
-        pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    # Сначала попробуем установить CPU-версию из официального источника, но с большим таймаутом
+    if ! pip install --timeout 300 'torch>=2.0.0,<3.0.0' 'torchaudio>=2.0.0,<3.0.0' --index-url https://download.pytorch.org/whl/cpu 2>/dev/null; then
+        log_warn "Не удалось установить PyTorch с download.pytorch.org, пробуем через зеркало..."
+        # Попробуем через стандартный индекс (возможно, там есть wheel'ы, или установим из source, что дольше)
+        pip install --timeout 300 'torch>=2.0.0,<3.0.0' 'torchaudio>=2.0.0,<3.0.0' || {
+            log_warn "Не удалось установить PyTorch. Продолжаем без него (функционал TTS может быть ограничен)."
+        }
     fi
     
     # ============================================================
