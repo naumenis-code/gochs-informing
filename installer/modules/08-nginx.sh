@@ -435,15 +435,18 @@ server {
         proxy_set_header Host $host;
     }
     
+    # WebSocket - ВАЖНО: должен быть ДО location /
     location /ws {
         proxy_pass http://127.0.0.1:8000/ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 86400;
     }
     
+    # Статические файлы - ВАЖНО: должен быть ПОСЛЕДНИМ
     location / {
         try_files $uri $uri/ /index.html;
     }
