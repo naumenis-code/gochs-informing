@@ -119,8 +119,8 @@ srt>=3.5.0,<4.0.0
 # Audio Processing
 # ------------------------------------------------------------------------------
 pydub>=0.25.0,<1.0.0
-wave>=0.0.2,<1.0.0
-pyaudio>=0.2.13,<1.0.0
+#wave>=0.0.2,<1.0.0
+#pyaudio>=0.2.13,<1.0.0
 
 # File Processing
 # ------------------------------------------------------------------------------
@@ -243,9 +243,10 @@ EOF
     
     # Установка PyTorch с умным подбором версии
     log_info "Установка PyTorch..."
-    if ! pip install torch>=2.0.0,<3.0.0 torchaudio>=2.0.0,<3.0.0 --index-url https://download.pytorch.org/whl/cpu 2>/dev/null; then
-    log_warn "Не удалось установить PyTorch с ограничениями, пробуем последнюю версию..."
-    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    # Экранируем версии, чтобы bash не пытался их интерпретировать
+    if ! pip install 'torch>=2.0.0,<3.0.0' 'torchaudio>=2.0.0,<3.0.0' --index-url https://download.pytorch.org/whl/cpu 2>/dev/null; then
+        log_warn "Не удалось установить PyTorch с ограничениями, пробуем последнюю версию..."
+        pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
     fi
     
     # ============================================================
