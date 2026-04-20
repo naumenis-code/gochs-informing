@@ -106,15 +106,14 @@ install() {
         deactivate 2>/dev/null || true
     fi
     
-    # 5. Включение pgcrypto в PostgreSQL
+        # 5.5. Исправление прав PostgreSQL (дополнительная страховка)
     if [[ -n "$POSTGRES_PASSWORD" ]]; then
-        log_info "Включение pgcrypto в PostgreSQL..."
-        PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;" 2>/dev/null
-        if [[ $? -eq 0 ]]; then
-            log_info "✓ pgcrypto включён"
-        else
-            log_warn "Не удалось включить pgcrypto"
-        fi
+        log_info "Проверка прав PostgreSQL..."
+        PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
+        PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
+        PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER SCHEMA public OWNER TO $POSTGRES_USER;" 2>/dev/null
+        PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO $POSTGRES_USER;" 2>/dev/null
+        log_info "✓ Права PostgreSQL проверены"
     fi
     
     # 6. Создание пользователя admin
@@ -139,15 +138,15 @@ EOF
         fi
     fi
     
-    # 7. Исправление gochs-worker.service
-    log_info "Проверка gochs-worker.service..."
-    if ! systemctl is-active --quiet gochs-worker 2>/dev/null; then
-        log_info "Исправление конфигурации gochs-worker.service..."
-        cat > /etc/systemd/system/gochs-worker.service << EOF
+    # 7.5. Исправление gochs-scheduler.service
+    log_info "Проверка gochs-scheduler.service..."
+    if ! systemctl is-active --quiet gochs-scheduler 2>/dev/null; then
+        log_info "Исправление конфигурации gochs-scheduler.service..."
+        cat > /etc/systemd/system/gochs-scheduler.service << EOF
 [Unit]
-Description=ГО-ЧС Celery Worker
-After=network.target redis-server.service postgresql.service
-Wants=redis-server.service postgresql.service
+Description=ГО-ЧС Celery Beat Scheduler
+After=network.target redis-server.service
+Wants=redis-server.service
 
 [Service]
 Type=simple
@@ -156,17 +155,22 @@ Group=$GOCHS_GROUP
 WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
-ExecStart=$INSTALL_DIR/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info
-Restart=always
-RestartSec=10
+ExecStart=/bin/bash -c 'cd $INSTALL_DIR && source venv/bin/activate && celery -A app.tasks.celery_app beat --loglevel=info'
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=30
+StandardOutput=append:$INSTALL_DIR/logs/scheduler.log
+StandardError=append:$INSTALL_DIR/logs/scheduler_error.log
 
 [Install]
 WantedBy=multi-user.target
 EOF
         systemctl daemon-reload
-        log_info "✓ gochs-worker.service исправлен"
+        systemctl restart gochs-scheduler
+        log_info "✓ gochs-scheduler.service исправлен"
     else
-        log_info "✓ gochs-worker.service работает"
+        log_info "✓ gochs-scheduler.service работает"
     fi
     
     # 8. Исправление gochs-api.service (таймаут)
