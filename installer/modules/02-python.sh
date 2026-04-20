@@ -187,10 +187,37 @@ flake8>=6.1.0,<8.0.0
 mypy>=1.7.0,<2.0.0
 ipython>=8.18.0,<9.0.0
 EOF
-    # Настройка pip на использование зеркала (для обхода блокировок/ускорения)
-    log_info "Настройка pip на использование зеркала Яндекса..."
-    pip config set global.index-url https://mirror.yandex.ru/pypi/simple/
-    pip config set global.trusted-host mirror.yandex.ru
+     # Настройка pip на использование зеркала (для обхода блокировок/ускорения)
+    log_info "Настройка pip на использование зеркала..."
+    
+    # Пробуем Яндекс
+    if curl -s --connect-timeout 5 https://mirror.yandex.ru/pypi/simple/ > /dev/null 2>&1; then
+        pip config set global.index-url https://mirror.yandex.ru/pypi/simple/
+        pip config set global.trusted-host mirror.yandex.ru
+        log_info "✓ Используется зеркало Яндекса"
+    # Fallback на официальный PyPI
+    else
+        pip config set global.index-url https://pypi.org/simple/
+        log_info "✓ Используется официальный PyPI"
+    fi
+    
+    # Увеличиваем таймаут
+    export PIP_DEFAULT_TIMEOUT=300
+    
+    # Устанавливаем критически важные пакеты явно (страховка)
+    log_info "Установка критических пакетов..."
+    pip install --timeout 300 fastapi uvicorn[standard] sqlalchemy redis celery pydantic python-dotenv || {
+        log_warn "Не удалось установить через pip, пробуем альтернативные зеркала..."
+        # Альтернативные зеркала
+        for mirror in "https://pypi.tuna.tsinghua.edu.cn/simple" "https://pypi.org/simple"; do
+            log_info "Пробуем зеркало: $mirror"
+            pip config set global.index-url "$mirror"
+            if pip install --timeout 300 fastapi uvicorn[standard] sqlalchemy redis celery pydantic python-dotenv; then
+                log_info "✓ Пакеты установлены через $mirror"
+                break
+            fi
+        done
+    }
     
     # Увеличиваем таймаут по умолчанию для надежности
     export PIP_DEFAULT_TIMEOUT=120
