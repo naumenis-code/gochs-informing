@@ -82,16 +82,18 @@ MODULE_DESCRIPTION="Nginx веб-сервер и прокси"
 CONFIG_FILE="${SCRIPT_DIR}/config/config.env"
 if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
-else
-    INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
-    DOMAIN_OR_IP="${DOMAIN_OR_IP:-192.168.0.166}"
-    ADMIN_EMAIL="${ADMIN_EMAIL:-admin@localhost}"
-    HTTP_PORT="${HTTP_PORT:-80}"
-    HTTPS_PORT="${HTTPS_PORT:-443}"
-    SSL_MODE="${SSL_MODE:-selfsigned}"
-    GOCHS_USER="${GOCHS_USER:-gochs}"
-    GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 fi
+
+# Fallback: загрузка из .env
+if [[ -z "$DOMAIN_OR_IP" ]] && [[ -f "$INSTALL_DIR/.env" ]]; then
+    source "$INSTALL_DIR/.env"
+fi
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+DOMAIN_OR_IP="${DOMAIN_OR_IP:-localhost}"
+SSL_MODE="${SSL_MODE:-selfsigned}"
+GOCHS_USER="${GOCHS_USER:-gochs}"
+GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 
 # Переменные для отслеживания SSL
 SSL_SUCCESS=false
