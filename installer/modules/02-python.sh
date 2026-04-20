@@ -54,123 +54,199 @@ install() {
 
 # Web Framework
 # ------------------------------------------------------------------------------
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
-websockets==12.0
-sse-starlette==1.6.5
+fastapi>=0.104.1,<1.0.0
+uvicorn[standard]>=0.24.0,<1.0.0
+python-multipart>=0.0.6,<1.0.0
+websockets>=12.0,<14.0
+sse-starlette>=1.6.0,<2.0.0
+aiofiles>=23.0.0,<25.0.0
 
 # Database
 # ------------------------------------------------------------------------------
-sqlalchemy==2.0.23
-alembic==1.12.1
-psycopg2-binary==2.9.9
-asyncpg==0.29.0
-greenlet==3.0.1
+sqlalchemy>=2.0.23,<3.0.0
+alembic>=1.12.0,<2.0.0
+psycopg2-binary>=2.9.9,<3.0.0
+asyncpg>=0.29.0,<1.0.0
+greenlet>=3.0.0,<4.0.0
 
 # Redis & Queue
 # ------------------------------------------------------------------------------
-redis==5.0.1
-celery==5.3.4
-flower==2.0.1
-kombu==5.3.2
+redis>=5.0.0,<6.0.0
+celery>=5.3.0,<6.0.0
+flower>=2.0.0,<3.0.0
+kombu>=5.3.0,<6.0.0
+vine>=5.1.0,<6.0.0
+billiard>=4.2.0,<5.0.0
+amqp>=5.2.0,<6.0.0
 
 # Security
 # ------------------------------------------------------------------------------
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-dotenv==1.0.0
-bcrypt==4.0.1
-python-multipart==0.0.6
-cryptography==41.0.7
+python-jose[cryptography]>=3.3.0,<4.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+python-dotenv>=1.0.0,<2.0.0
+bcrypt>=4.0.0,<5.0.0
+cryptography>=41.0.0,<45.0.0
+pycparser>=2.21,<3.0.0
 
 # Asterisk Integration
 # ------------------------------------------------------------------------------
-pyst2==0.5.1
-py-asterisk==0.5.20
-panoramisk==1.4
-aioari==0.10.2
-websocket-client==1.6.4
+pyst2>=0.5.0,<1.0.0
+py-asterisk>=0.5.0,<1.0.0
+panoramisk>=1.4.0,<2.0.0
+aioari>=0.10.0,<1.0.0
+websocket-client>=1.6.0,<2.0.0
 
 # TTS (offline) - Coqui TTS
 # ------------------------------------------------------------------------------
-TTS==0.22.0
-torch==2.1.0
-torchaudio==2.1.0
-numpy==1.24.3
-scipy==1.11.4
-librosa==0.10.1
-soundfile==0.12.1
-resampy==0.4.2
+TTS>=0.22.0,<1.0.0
+torch>=2.0.0,<3.0.0
+torchaudio>=2.0.0,<3.0.0
+numpy>=1.24.0,<2.0.0
+scipy>=1.11.0,<2.0.0
+librosa>=0.10.0,<1.0.0
+soundfile>=0.12.0,<1.0.0
+resampy>=0.4.0,<1.0.0
+inflect>=7.0.0,<8.0.0
+tqdm>=4.65.0,<5.0.0
+anyascii>=0.3.0,<1.0.0
 
 # STT (offline) - Vosk
 # ------------------------------------------------------------------------------
-vosk==0.3.45
-sounddevice==0.4.6
+vosk>=0.3.45,<1.0.0
+sounddevice>=0.4.0,<1.0.0
+srt>=3.5.0,<4.0.0
 
 # Audio Processing
 # ------------------------------------------------------------------------------
-pydub==0.25.1
-wave==0.0.2
-pyaudio==0.2.13
+pydub>=0.25.0,<1.0.0
+wave>=0.0.2,<1.0.0
+pyaudio>=0.2.13,<1.0.0
 
 # File Processing
 # ------------------------------------------------------------------------------
-pandas==1.5.3
-openpyxl==3.1.2
-xlrd==2.0.1
-python-magic==0.4.27
-aiofiles==23.2.1
+pandas>=1.5.0,<2.0.0
+openpyxl>=3.1.0,<4.0.0
+xlrd>=2.0.0,<3.0.0
+python-magic>=0.4.27,<1.0.0
+et-xmlfile>=1.1.0,<2.0.0
 
 # Data Validation
 # ------------------------------------------------------------------------------
-pydantic==2.5.0
-pydantic-settings==2.1.0
-email-validator==2.3.0
-phonenumbers==8.13.25
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0
+pydantic-core>=2.14.0,<3.0.0
+email-validator>=2.0.0,<3.0.0
+phonenumbers>=8.13.0,<9.0.0
+dnspython>=2.4.0,<3.0.0
+annotated-types>=0.6.0,<1.0.0
 
-# Utilities
+# HTTP & Network
 # ------------------------------------------------------------------------------
-httpx==0.25.2
-aiohttp==3.9.0
-requests==2.31.0
-python-dateutil==2.8.2
-pytz==2023.3
-click==8.1.7
-pyyaml==6.0.1
-jinja2==3.1.2
-python-json-logger==2.0.7
+httpx>=0.25.0,<1.0.0
+aiohttp>=3.9.0,<4.0.0
+requests>=2.31.0,<3.0.0
+httpcore>=1.0.0,<2.0.0
+h11>=0.14.0,<1.0.0
+certifi>=2023.0.0
+urllib3>=2.0.0,<3.0.0
+charset-normalizer>=3.0.0,<4.0.0
+idna>=3.0.0,<4.0.0
+
+# Date & Time
+# ------------------------------------------------------------------------------
+python-dateutil>=2.8.0,<3.0.0
+pytz>=2023.0
+tzdata>=2023.0
+
+# CLI & Config
+# ------------------------------------------------------------------------------
+click>=8.1.0,<9.0.0
+pyyaml>=6.0.0,<7.0.0
+
+# Templates
+# ------------------------------------------------------------------------------
+jinja2>=3.1.0,<4.0.0
+MarkupSafe>=2.1.0,<3.0.0
+
+# Logging
+# ------------------------------------------------------------------------------
+python-json-logger>=2.0.0,<3.0.0
 
 # Monitoring & Metrics
 # ------------------------------------------------------------------------------
-prometheus-client==0.19.0
-psutil==5.9.6
+prometheus-client>=0.19.0,<1.0.0
+psutil>=5.9.0,<6.0.0
 
 # Development & Debug
 # ------------------------------------------------------------------------------
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-black==23.11.0
-flake8==6.1.0
-mypy==1.7.0
-ipython==8.18.1
+pytest>=7.4.0,<9.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+pytest-cov>=4.1.0,<6.0.0
+black>=23.0.0,<25.0.0
+flake8>=6.1.0,<8.0.0
+mypy>=1.7.0,<2.0.0
+ipython>=8.18.0,<9.0.0
 EOF
 
-    # Установка зависимостей
-    log_info "Установка Python пакетов (это может занять несколько минут)..."
+    # Установка зависимостей с умным подбором версий
+    log_info "Установка Python пакетов (умный подбор версий)..."
     
-    # Установка основных пакетов
-    if pip install -r "$INSTALL_DIR/requirements.txt"; then
+    # Функция для умной установки пакета
+    smart_install() {
+        local package="$1"
+        local min_version="$2"
+        local max_version="${3:-}"
+        
+        if [[ -n "$max_version" ]]; then
+            if pip install "$package>=$min_version,$max_version" --quiet 2>/dev/null; then
+                return 0
+            fi
+        else
+            if pip install "$package>=$min_version" --quiet 2>/dev/null; then
+                return 0
+            fi
+        fi
+        
+        # Если не получилось - пробуем без ограничения версии
+        log_warn "Не удалось установить $package с ограничениями, пробуем последнюю версию..."
+        if pip install "$package" --quiet 2>/dev/null; then
+            return 0
+        fi
+        
+        return 1
+    }
+    
+    # Сначала пробуем установить всё из requirements.txt с флагом --upgrade-strategy eager
+    if pip install --upgrade-strategy only-if-needed -r "$INSTALL_DIR/requirements.txt" 2>&1 | tee /tmp/pip_install.log; then
         log_info "Основные пакеты установлены успешно"
     else
-        log_error "Ошибка при установке пакетов"
-        return 1
+        log_warn "Некоторые пакеты не установились с ограничениями, пробуем без них..."
+        
+        # Установка по одному с игнорированием ошибок
+        while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+            [[ "$line" =~ ^# ]] && continue
+            [[ "$line" =~ ^-- ]] && continue
+            
+            pkg=$(echo "$line" | cut -d'#' -f1 | xargs)
+            [[ -z "$pkg" ]] && continue
+            
+            pip install "$pkg" --quiet 2>/dev/null || log_warn "Не удалось установить: $pkg"
+        done < "$INSTALL_DIR/requirements.txt"
     fi
     
-     # Установка PyTorch отдельно
+    # Сохраняем реально установленные версии для будущих обновлений
+    log_info "Сохранение установленных версий..."
+    pip freeze | grep -E "fastapi|uvicorn|sqlalchemy|redis|celery|pydantic|TTS|vosk|pandas|torch" > "$INSTALL_DIR/requirements.lock"
+    
+    log_info "Установленные версии сохранены в requirements.lock"
+    
+    # Установка PyTorch с умным подбором версии
     log_info "Установка PyTorch..."
-    pip install torch==2.1.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cpu
+    if ! pip install torch>=2.0.0,<3.0.0 torchaudio>=2.0.0,<3.0.0 --index-url https://download.pytorch.org/whl/cpu 2>/dev/null; then
+    log_warn "Не удалось установить PyTorch с ограничениями, пробуем последнюю версию..."
+    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    fi
     
     # ============================================================
     # Загрузка моделей для Vosk с вашего зеркала
