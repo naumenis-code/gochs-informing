@@ -84,7 +84,7 @@ amqp>=5.2.0,<6.0.0
 python-jose[cryptography]>=3.3.0,<4.0.0
 passlib[bcrypt]>=1.7.4,<2.0.0
 python-dotenv>=1.0.0,<2.0.0
-bcrypt>=4.0.0,<5.0.0
+bcrypt>=4.0.1,<5.0.0
 cryptography>=41.0.0,<45.0.0
 pycparser>=2.21,<3.0.0
 
