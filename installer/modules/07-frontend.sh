@@ -191,7 +191,6 @@ create_config_files() {
     "react-hook-form": ">=7.48.2 <8.0.0",
     "yup": ">=1.3.3 <2.0.0",
     "@hookform/resolvers": ">=3.3.2 <4.0.0",
-    "socket.io-client": ">=4.5.4 <5.0.0",
     "react-audio-player": ">=0.17.0 <1.0.0",
     "wavesurfer.js": ">=7.4.0 <8.0.0",
     "xlsx": ">=0.18.5 <1.0.0",
@@ -1254,50 +1253,58 @@ EOF
     # useWebSocket.ts
     cat > "$INSTALL_DIR/frontend/src/hooks/useWebSocket.ts" << 'EOF'
 import { useEffect, useState, useRef } from 'react';
-import io, { Socket } from 'socket.io-client';
 
 export const useWebSocket = (endpoint: string = '/ws') => {
   const [connected, setConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<any>(null);
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    
-    const socket = io({
-      path: endpoint,
-      auth: { token },
-      transports: ['websocket'],
-    });
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}${endpoint}`;
 
-    socket.on('connect', () => {
-      console.log('WebSocket connected');
+    console.log(`[WebSocket] Connecting to: ${wsUrl}`);
+    const socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => {
+      console.log('[WebSocket] Connected');
       setConnected(true);
-    });
+    };
 
-    socket.on('disconnect', () => {
-      console.log('WebSocket disconnected');
+    socket.onclose = (event) => {
+      console.log('[WebSocket] Disconnected', event.reason);
       setConnected(false);
-    });
+    };
 
-    socket.on('message', (data) => {
-      setLastMessage(data);
-    });
+    socket.onerror = (error) => {
+      console.error('[WebSocket] Error:', error);
+      setConnected(false);
+    };
 
-    socket.on('error', (error) => {
-      console.error('WebSocket error:', error);
-    });
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setLastMessage(data);
+      } catch (e) {
+        console.error('[WebSocket] Failed to parse message:', event.data);
+      }
+    };
 
     socketRef.current = socket;
 
     return () => {
-      socket.disconnect();
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.close();
+      }
     };
   }, [endpoint]);
 
   const sendMessage = (event: string, data: any) => {
-    if (socketRef.current && connected) {
-      socketRef.current.emit(event, data);
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      const message = JSON.stringify({ event, data });
+      socketRef.current.send(message);
+    } else {
+      console.warn('[WebSocket] Cannot send message: socket is not open');
     }
   };
 
