@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Audit schemas - полная версия"""
+"""Audit schemas - исправленная рабочая версия"""
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Any, Dict
 from uuid import UUID
 from datetime import datetime
@@ -61,21 +61,21 @@ class EntityType(str, Enum):
 
 class AuditLogBase(BaseModel):
     """Базовая схема аудита"""
-    user_id: Optional[UUID] = Field(None, description="ID пользователя")
-    user_name: Optional[str] = Field(None, max_length=255, description="Имя пользователя")
-    user_role: Optional[str] = Field(None, max_length=50, description="Роль пользователя")
-    action: str = Field(..., max_length=100, description="Тип действия")
-    entity_type: Optional[str] = Field(None, max_length=50, description="Тип объекта")
-    entity_id: Optional[UUID] = Field(None, description="ID объекта")
-    entity_name: Optional[str] = Field(None, max_length=255, description="Имя объекта")
-    details: Optional[Dict[str, Any]] = Field(None, description="Детали")
-    ip_address: Optional[str] = Field(None, max_length=45, description="IP адрес")
-    user_agent: Optional[str] = Field(None, description="User-Agent")
-    request_method: Optional[str] = Field(None, max_length=10, description="HTTP метод")
-    request_path: Optional[str] = Field(None, max_length=500, description="Путь запроса")
-    status: AuditStatus = Field(AuditStatus.SUCCESS, description="Статус")
-    error_message: Optional[str] = Field(None, description="Сообщение об ошибке")
-    execution_time_ms: Optional[int] = Field(None, ge=0, description="Время выполнения (мс)")
+    user_id: Optional[UUID] = None
+    user_name: Optional[str] = None
+    user_role: Optional[str] = None
+    action: str = ""
+    entity_type: Optional[str] = None
+    entity_id: Optional[UUID] = None
+    entity_name: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    request_method: Optional[str] = None
+    request_path: Optional[str] = None
+    status: AuditStatus = AuditStatus.SUCCESS
+    error_message: Optional[str] = None
+    execution_time_ms: Optional[int] = None
 
 
 class AuditLogCreate(AuditLogBase):
@@ -87,21 +87,15 @@ class AuditLogUpdate(BaseModel):
     """Схема для обновления записи аудита"""
     status: Optional[AuditStatus] = None
     error_message: Optional[str] = None
-    execution_time_ms: Optional[int] = Field(None, ge=0)
+    execution_time_ms: Optional[int] = None
 
 
 class AuditLogResponse(AuditLogBase):
     """Схема для ответа с записью аудита"""
-    id: UUID = Field(..., description="ID записи")
-    created_at: datetime = Field(..., description="Дата создания")
+    id: UUID
+    created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
-    
-    @field_validator('created_at', mode='before')
-    def format_datetime(cls, v):
-        if isinstance(v, datetime):
-            return v.isoformat()
-        return v
 
 
 # ============================================================================
@@ -110,40 +104,40 @@ class AuditLogResponse(AuditLogBase):
 
 class AuditStatsResponse(BaseModel):
     """Схема статистики аудита"""
-    total_events: int = Field(..., description="Всего событий")
-    today_events: int = Field(..., description="Событий за сегодня")
-    week_events: int = Field(..., description="Событий за неделю")
-    month_events: int = Field(..., description="Событий за месяц", default=0)
-    unique_users: int = Field(..., description="Уникальных пользователей")
-    error_events: int = Field(..., description="Событий с ошибками")
-    warning_events: int = Field(..., description="Событий с предупреждениями")
-    top_actions: List[Dict[str, Any]] = Field(default_factory=list, description="Топ действий")
-    top_entities: List[Dict[str, Any]] = Field(default_factory=list, description="Топ сущностей")
-    top_users: List[Dict[str, Any]] = Field(default_factory=list, description="Топ пользователей")
-    recent_activity: List[Dict[str, Any]] = Field(default_factory=list, description="Последняя активность")
-    hourly_stats: List[Dict[str, Any]] = Field(default_factory=list, description="Почасовая статистика")
+    total_events: int = 0
+    today_events: int = 0
+    week_events: int = 0
+    month_events: int = 0
+    unique_users: int = 0
+    error_events: int = 0
+    warning_events: int = 0
+    top_actions: List[Dict[str, Any]] = []
+    top_entities: List[Dict[str, Any]] = []
+    top_users: List[Dict[str, Any]] = []
+    recent_activity: List[Dict[str, Any]] = []
+    hourly_stats: List[Dict[str, Any]] = []
 
 
 class DailyStatsResponse(BaseModel):
     """Схема дневной статистики"""
-    date: str = Field(..., description="Дата")
-    total: int = Field(..., description="Всего событий")
-    success: int = Field(..., description="Успешных")
-    warnings: int = Field(..., description="Предупреждений")
-    errors: int = Field(..., description="Ошибок")
+    date: str
+    total: int = 0
+    success: int = 0
+    warnings: int = 0
+    errors: int = 0
 
 
 class UserActivityResponse(BaseModel):
     """Схема активности пользователя"""
-    user_id: str = Field(..., description="ID пользователя")
-    user_name: Optional[str] = Field(None, description="Имя пользователя")
-    user_role: Optional[str] = Field(None, description="Роль")
-    total_actions: int = Field(..., description="Всего действий")
-    first_action: Optional[str] = Field(None, description="Первое действие")
-    last_action: Optional[str] = Field(None, description="Последнее действие")
-    actions_by_type: Dict[str, int] = Field(default_factory=dict, description="Действия по типам")
-    actions_by_entity: Dict[str, int] = Field(default_factory=dict, description="Действия по сущностям")
-    recent_logs: List[AuditLogResponse] = Field(default_factory=list, description="Последние записи")
+    user_id: str
+    user_name: Optional[str] = None
+    user_role: Optional[str] = None
+    total_actions: int = 0
+    first_action: Optional[str] = None
+    last_action: Optional[str] = None
+    actions_by_type: Dict[str, int] = {}
+    actions_by_entity: Dict[str, int] = {}
+    recent_logs: List[AuditLogResponse] = []
 
 
 # ============================================================================
@@ -152,29 +146,29 @@ class UserActivityResponse(BaseModel):
 
 class AuditLogFilterParams(BaseModel):
     """Параметры фильтрации аудита"""
-    action: Optional[str] = Field(None, description="Фильтр по действию")
-    entity_type: Optional[str] = Field(None, description="Фильтр по типу сущности")
-    user_name: Optional[str] = Field(None, description="Фильтр по имени пользователя")
-    user_id: Optional[UUID] = Field(None, description="Фильтр по ID пользователя")
-    status: Optional[AuditStatus] = Field(None, description="Фильтр по статусу")
-    start_date: Optional[datetime] = Field(None, description="Начальная дата")
-    end_date: Optional[datetime] = Field(None, description="Конечная дата")
-    ip_address: Optional[str] = Field(None, description="Фильтр по IP")
+    action: Optional[str] = None
+    entity_type: Optional[str] = None
+    user_name: Optional[str] = None
+    user_id: Optional[UUID] = None
+    status: Optional[AuditStatus] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    ip_address: Optional[str] = None
 
 
 class AuditLogListResponse(BaseModel):
     """Схема списка записей аудита"""
-    items: List[AuditLogResponse] = Field(..., description="Список записей")
-    total: int = Field(..., description="Общее количество")
-    page: int = Field(1, description="Текущая страница")
-    page_size: int = Field(100, description="Размер страницы")
-    has_next: bool = Field(False, description="Есть ли следующая страница")
-    has_prev: bool = Field(False, description="Есть ли предыдущая страница")
+    items: List[AuditLogResponse] = []
+    total: int = 0
+    page: int = 1
+    page_size: int = 100
+    has_next: bool = False
+    has_prev: bool = False
 
 
 class ClearOldLogsResponse(BaseModel):
     """Схема ответа при очистке старых логов"""
-    message: str = Field(..., description="Сообщение")
-    deleted_count: int = Field(..., description="Количество удаленных записей")
-    older_than_days: int = Field(..., description="Старше (дней)")
-    cutoff_date: str = Field(..., description="Дата отсечки")
+    message: str = ""
+    deleted_count: int = 0
+    older_than_days: int = 0
+    cutoff_date: Optional[str] = None
