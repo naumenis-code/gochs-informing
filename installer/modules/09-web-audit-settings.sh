@@ -3,7 +3,7 @@
 ################################################################################
 # Модуль: 09-web-audit-settings.sh
 # Назначение: Установка страниц Аудита и Настроек, копирование файлов в проект
-# Версия: 1.0.2 (полная)
+# Версия: 1.0.4 (полная исправленная версия)
 ################################################################################
 
 # Определение путей
@@ -75,8 +75,7 @@ fi
 
 # Fallback: парсинг из credentials
 if [[ -z "$POSTGRES_PASSWORD" ]] && [[ -f "/root/.gochs_credentials" ]]; then
-    POSTGRES_PASSWORD=$(grep -A 2 "БАЗА ДАННЫХ POSTGRESQL:" /root/.gochs_credentials | grep -oP 'Пароль: \K.*')
-    REDIS_PASSWORD=$(grep -A 2 "REDIS:" /root/.gochs_credentials | grep -oP 'Пароль: \K.*')
+    POSTGRES_PASSWORD=$(grep -A 3 "БАЗА ДАННЫХ POSTGRESQL:" /root/.gochs_credentials | grep -oP 'Пароль: \K.*')
 fi
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
@@ -115,6 +114,9 @@ install() {
     
     # Проверка и исправление прав в базе данных
     fix_database_permissions
+    
+    # Исправление импортов иконок в Settings.tsx
+    fix_settings_imports
     
     # Обновление импортов в frontend
     update_frontend_imports
@@ -240,6 +242,59 @@ copy_backend_files() {
     log_info "Файлы бэкенда скопированы"
 }
 
+fix_settings_imports() {
+    log_info "Проверка и исправление импортов в Settings.tsx..."
+    
+    local settings_file="$TARGET_FRONTEND/pages/Settings.tsx"
+    
+    if [[ ! -f "$settings_file" ]]; then
+        log_warn "Файл Settings.tsx не найден"
+        return
+    fi
+    
+    backup_file "$settings_file"
+    
+    # Список необходимых иконок
+    local required_icons=(
+        "SettingOutlined"
+        "SaveOutlined"
+        "ReloadOutlined"
+        "PhoneOutlined"
+        "CloudServerOutlined"
+        "SafetyOutlined"
+        "BellOutlined"
+        "ApiOutlined"
+        "CheckCircleOutlined"
+        "CloseCircleOutlined"
+        "SyncOutlined"
+        "EditOutlined"
+    )
+    
+    # Получаем текущую строку импорта
+    local import_line=$(grep -n "^import.*from '@ant-design/icons'" "$settings_file" | head -1)
+    
+    if [[ -z "$import_line" ]]; then
+        # Если нет импорта из ant-design/icons, добавляем
+        sed -i "1s/^/import { SettingOutlined } from '@ant-design\/icons';\n/" "$settings_file"
+        import_line=1
+    fi
+    
+    local line_num=$(echo "$import_line" | cut -d: -f1)
+    
+    # Проверяем каждую иконку
+    for icon in "${required_icons[@]}"; do
+        if ! grep -q "$icon" "$settings_file"; then
+            log_info "  Добавляем $icon в импорт"
+            sed -i "${line_num}s/import {/import { $icon, /" "$settings_file"
+        fi
+    done
+    
+    # Убираем лишние запятые
+    sed -i "${line_num}s/, }/ }/" "$settings_file"
+    
+    log_info "✓ Импорты иконок исправлены"
+}
+
 update_api_routers() {
     log_info "Обновление API роутеров..."
     
@@ -282,11 +337,7 @@ ROUTER_EOF
         
         # Проверяем, есть ли уже include_router для settings
         if ! grep -q 'include_router(settings.router' "$api_init"; then
-            if grep -q 'include_router(monitoring.router' "$api_init"; then
-                sed -i '/include_router(monitoring.router/a\api_router.include_router(settings.router, prefix="/settings", tags=["settings"])' "$api_init"
-            else
-                echo 'api_router.include_router(settings.router, prefix="/settings", tags=["settings"])' >> "$api_init"
-            fi
+            echo 'api_router.include_router(settings.router, prefix="/settings", tags=["settings"])' >> "$api_init"
         fi
         
         # Проверяем, есть ли уже include_router для audit
@@ -300,7 +351,6 @@ ROUTER_EOF
     if [[ -f "$models_init" ]]; then
         if ! grep -q "AuditLog" "$models_init"; then
             echo "from app.models.audit_log import AuditLog" >> "$models_init"
-            echo "__all__ = [\"User\", \"Contact\", \"Campaign\", \"AuditLog\"]" >> "$models_init"
         fi
     fi
     
@@ -416,16 +466,12 @@ fix_database_permissions() {
     
     log_info "Настройка прав доступа для $POSTGRES_USER..."
     
-    # Гранты на все таблицы
+    # Гранты
     run_sql "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
-    # Гранты на все последовательности
     run_sql "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
-    # Гранты на все функции
     run_sql "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
-    # Дефолтные привилегии
     run_sql "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO $POSTGRES_USER;" 2>/dev/null
     run_sql "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO $POSTGRES_USER;" 2>/dev/null
-    # Права на схему
     run_sql "GRANT ALL ON SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
     
     log_info "✓ Права доступа настроены"
@@ -465,13 +511,9 @@ update_frontend_imports() {
         
         # Проверяем, есть ли уже Route для Settings
         if ! grep -q 'path="settings"' "$app_tsx"; then
-            # Находим место для добавления Route
-            if grep -q 'path="audit"' "$app_tsx"; then
-                sed -i '/path="audit"/i \          <Route path="settings" element={<Settings />} />' "$app_tsx"
-            elif grep -q 'path="users"' "$app_tsx"; then
+            if grep -q 'path="users"' "$app_tsx"; then
                 sed -i '/path="users"/i \          <Route path="settings" element={<Settings />} />' "$app_tsx"
             else
-                # Добавляем в конец блока Routes
                 sed -i '/<\/Routes>/i \          <Route path="settings" element={<Settings />} />' "$app_tsx"
             fi
         fi
@@ -483,7 +525,7 @@ update_frontend_imports() {
         
         log_info "✓ App.tsx обновлен"
     else
-        log_warn "Файл App.tsx не найден, пропускаем обновление импортов"
+        log_warn "Файл App.tsx не найден"
     fi
     
     # Обновление Layout для добавления пунктов меню
@@ -499,19 +541,17 @@ update_layout_menu() {
         backup_file "$layout_file"
         
         # Добавляем импорты иконок если нужно
-        if ! grep -q "SettingOutlined" "$layout_file"; then
-            sed -i "s/import {/import { SettingOutlined, AuditOutlined, /" "$layout_file"
+        if ! grep -q "AuditOutlined" "$layout_file"; then
+            sed -i "s/import {/import { AuditOutlined, SettingOutlined, /" "$layout_file"
         fi
         
         # Проверяем, есть ли пункт меню "Настройки"
         if ! grep -q "key: '/settings'" "$layout_file"; then
-            # Добавляем в adminMenuItems
             sed -i "/const adminMenuItems = \[/a \    { key: '\/settings', icon: <SettingOutlined \/>, label: 'Настройки' }," "$layout_file"
         fi
         
         # Проверяем, есть ли пункт меню "Аудит"
         if ! grep -q "key: '/audit'" "$layout_file"; then
-            # Добавляем в adminMenuItems
             sed -i "/const adminMenuItems = \[/a \    { key: '\/audit', icon: <AuditOutlined \/>, label: 'Аудит' }," "$layout_file"
         fi
         
@@ -542,7 +582,6 @@ rebuild_frontend() {
     if npm run build 2>&1 | tail -10; then
         log_info "✓ Фронтенд успешно пересобран"
         
-        # Копирование в nginx
         if [[ -d "build" ]]; then
             chown -R www-data:www-data "$INSTALL_DIR/frontend/build" 2>/dev/null || true
         fi
@@ -557,22 +596,18 @@ rebuild_frontend() {
 restart_services() {
     log_info "Перезапуск сервисов..."
     
-    # Перезапуск API для применения новых эндпоинтов
     if systemctl is-active --quiet gochs-api.service 2>/dev/null; then
         systemctl restart gochs-api.service
         log_info "✓ gochs-api перезапущен"
     fi
     
-    # Перезапуск Nginx для применения новых статических файлов
     if systemctl is-active --quiet nginx 2>/dev/null; then
         systemctl reload nginx 2>/dev/null || systemctl restart nginx
         log_info "✓ nginx перезагружен"
     fi
     
-    # Даем время на запуск
     sleep 3
     
-    # Проверка статуса
     if systemctl is-active --quiet gochs-api.service; then
         log_info "✓ API сервис работает"
     else
@@ -582,8 +617,6 @@ restart_services() {
 
 uninstall() {
     log_step "Удаление модуля ${MODULE_NAME}"
-    
-    log_warn "Удаление страниц Настройки и Аудита..."
     
     # Удаление файлов фронтенда
     rm -f "$TARGET_FRONTEND/pages/Settings.tsx" 2>/dev/null
@@ -599,14 +632,6 @@ uninstall() {
     rm -f "$TARGET_APP/models/audit_log.py" 2>/dev/null
     
     log_info "Файлы модуля удалены"
-    
-    # Восстановление роутеров из бэкапа
-    local api_init="$TARGET_APP/api/v1/__init__.py"
-    local latest_backup=$(ls -t "${api_init}.backup."* 2>/dev/null | head -1)
-    if [[ -n "$latest_backup" ]]; then
-        cp "$latest_backup" "$api_init"
-        log_info "Восстановлен оригинальный api/v1/__init__.py"
-    fi
     
     return 0
 }
@@ -660,14 +685,6 @@ check_status() {
     else
         log_warn "  ✗ Таблица audit_logs не найдена"
         status=1
-    fi
-    
-    # Проверка эндпоинтов API
-    log_info "Проверка API эндпоинтов..."
-    if curl -s http://localhost:8000/docs 2>/dev/null | grep -q "settings\|audit"; then
-        log_info "  ✓ Эндпоинты settings/audit доступны"
-    else
-        log_info "  (проверьте после перезапуска API)"
     fi
     
     return $status
