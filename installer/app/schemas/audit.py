@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Audit schemas"""
+"""Audit schemas - полная версия"""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Any
 from uuid import UUID
 from datetime import datetime
@@ -41,7 +41,10 @@ class AuditLogResponse(AuditLogBase):
 class AuditStatsResponse(BaseModel):
     total_events: int
     today_events: int
+    week_events: int
     unique_users: int
     error_events: int
+    warning_events: int
     top_actions: List[dict]
+    top_entities: List[dict]
     recent_activity: List[dict]
