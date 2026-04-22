@@ -109,6 +109,16 @@ install() {
         python3-setuptools \
         python3-wheel
     
+        # Создание директории логов
+    log_info "Создание директории логов..."
+    mkdir -p "$INSTALL_DIR/logs"
+    if id -u "$GOCHS_USER" &>/dev/null; then
+        chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/logs" 2>/dev/null || true
+    fi
+    chmod 755 "$INSTALL_DIR/logs"
+    log_info "✓ Директория логов создана"
+
+
     # Создание пользователя системы
     log_info "Создание системного пользователя..."
     if ! id -u "$GOCHS_USER" &>/dev/null; then
