@@ -555,7 +555,6 @@ full_install() {
         "06-backend"
         "07-frontend"
         "08-nginx"
-        "99-postfix"
     )
     
     local failed_modules=""
@@ -775,7 +774,6 @@ selective_install() {
         [6]="06-backend"
         [7]="07-frontend"
         [8]="08-nginx"
-        [9]="99-postfix"
     )
     
     for num in $modules; do
