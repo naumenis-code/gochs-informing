@@ -1,454 +1,1106 @@
-ТЕХНИЧЕСКОЕ ЗАДАНИЕ (ФИНАЛЬНОЕ / РАСШИРЕННОЕ)
-(подробная production-редакция)
-Проект: ГО-ЧС Информирование
-Полное название
-Локальная корпоративная система ГО-ЧС информирования, аварийного голосового оповещения, приема входящих голосовых сообщений и централизованного управления сценариями оповещения предприятия.
-________________________________________
-1. Цель проекта
-Разработать автономную локальную систему для предприятия, которая позволит оперативно запускать массовое голосовое оповещение сотрудников при чрезвычайных и нештатных ситуациях через существующую телефонную инфраструктуру.
-Система должна использовать действующую АТС предприятия (FreePBX/Asterisk), работать на отдельном сервере Debian 12 и управляться через WEB интерфейс.
-________________________________________
-2. Какие задачи решает система
-Система предназначена для:
-•	экстренного оповещения персонала; 
-•	автоматического обзвона сотрудников; 
-•	передачи голосовых инструкций; 
-•	повторного дозвона недоступным абонентам; 
-•	информирования внутренних и мобильных номеров; 
-•	приема обратной голосовой связи; 
-•	хранения истории уведомлений; 
-•	контроля ресурсов телефонии; 
-•	централизованного управления из браузера; 
-•	разграничения доступа сотрудников. 
-________________________________________
-3. Основные сценарии использования
-Сценарий 1 — Пожар
-Оператор выбирает сценарий “Пожар”, группу “Все сотрудники”, запускает обзвон. Система звонит всем номерам и проигрывает сообщение.
-Сценарий 2 — Эвакуация корпуса
-Оповещение только группы конкретного здания.
-Сценарий 3 — Срочный сбор руководства
-Оповещение только руководителей.
-Сценарий 4 — Входящее сообщение сотрудника
-Сотрудник звонит на внутренний номер системы, слышит приветствие и оставляет сообщение.
-________________________________________
-4. Общие технические требования
-Операционная система
-•	Debian 12 
-Размещение
-•	Только локальный сервер предприятия 
-Запрещено использовать
-•	Docker 
-•	Kubernetes 
-•	облачные TTS/STT 
-•	SaaS телефонию 
-•	монолитное single-file приложение 
-Все процессы запускаются через:
-systemd
-________________________________________
-5. Архитектура решения
-WEB React
-   ↓
-FastAPI Backend
-   ↓
-PostgreSQL + Redis
-   ↓
-Asterisk (ядро телефонии)
-   ↓
-FreePBX предприятия
-   ↓
-Внутренние / мобильные номера
-________________________________________
-6. Телефонное ядро
-Телефонным ядром является локально установленный
-Asterisk
-Рекомендуемая версия:
-•	Asterisk 20 LTS или выше 
-Назначение:
-•	регистрация в FreePBX; 
-•	исходящие вызовы; 
-•	входящие вызовы; 
-•	воспроизведение аудио; 
-•	запись звонков; 
-•	управление каналами; 
-•	маршрутизация; 
-•	очереди звонков; 
-•	интеграция с backend. 
-________________________________________
-7. Интеграция с FreePBX
-Поддерживаемые версии:
-•	FreePBX 14 
-•	FreePBX 15 
-•	FreePBX 16 
-Используемые механизмы:
-•	PJSIP extension 
-•	PJSIP trunk (при необходимости) 
-•	Asterisk AMI 
-•	ARI (опционально) 
-Запрещено:
-•	chan_sip legacy 
-________________________________________
-8. Настройки телефонии через WEB
-Администратор может менять:
-•	IP FreePBX; 
-•	порт; 
-•	внутренний номер регистрации; 
-•	логин; 
-•	пароль; 
-•	transport UDP/TCP/TLS; 
-•	max channels; 
-•	кодеки; 
-•	таймауты; 
-•	включение/отключение регистрации. 
-После сохранения:
-•	reload PJSIP; 
-•	тест регистрации; 
-•	статус ONLINE/OFFLINE; 
-•	запись в аудит. 
-________________________________________
-9. Поддерживаемые номера
-Внутренние номера:
-•	3-х значные 
-•	4-х значные 
-•	расширяемые 
-Внешние:
-•	+7XXXXXXXXXX 
-•	8XXXXXXXXXX 
-________________________________________
-10. Контактная база
-Минимум 500 номеров.
-Возможности:
-•	ручное добавление; 
-•	массовый импорт CSV/XLSX; 
-•	редактирование; 
-•	удаление; 
-•	архивирование; 
-•	группы; 
-•	отделы; 
-•	теги; 
-•	поиск; 
-•	фильтрация. 
-Поля контакта:
-•	ФИО 
-•	подразделение 
-•	должность 
-•	внутренний номер 
-•	мобильный номер 
-•	email (опционально) 
-•	активен/неактивен 
-•	комментарий 
-________________________________________
-11. Голосовые сценарии оповещения
-Форматы создания:
-Вариант 1
-Текст → русский голос (TTS)
-Вариант 2
-Загрузка готового файла:
-•	WAV 
-•	MP3 
-Для каждого сценария:
-•	название; 
-•	категория; 
-•	текст; 
-•	аудиофайл; 
-•	длительность; 
-•	дата создания; 
-•	автор; 
-•	активен/архив. 
-________________________________________
-12. Примеры сценариев
-•	Пожар 
-•	Эвакуация 
-•	Срочный сбор руководства 
-•	Технологическая авария 
-•	Утечка газа 
-•	Проверка связи 
-•	Учебная тревога 
-________________________________________
-13. Массовый обзвон
-Пользовательский процесс:
-1.	Выбрать сценарий 
-2.	Выбрать группу 
-3.	Указать параметры 
-4.	Нажать запуск 
-Возможности:
-•	запуск оператором; 
-•	запуск администратором; 
-•	мгновенный старт; 
-•	очередь задач; 
-•	приоритетные задачи; 
-•	параллельные задачи (опционально); 
-•	ограничение по линиям. 
-Производительность:
-•	минимум 20 одновременных вызовов; 
-•	масштабирование до 50+ при ресурсах сервера. 
-________________________________________
-14. Статусы звонков
-•	в очереди 
-•	набирается 
-•	дозвонено 
-•	сообщение воспроизведено 
-•	занято 
-•	не ответил 
-•	ошибка маршрута 
-•	ошибка канала 
-•	сброшен 
-•	остановлен оператором 
-•	остановлен администратором 
-________________________________________
-15. Повторные вызовы
-Настраивает только Администратор.
-Параметры:
-•	количество повторов; 
-•	интервал между попытками; 
-•	рабочие часы повторов; 
-•	ограничение общего времени кампании. 
-Повторять если:
-•	занято; 
-•	не ответил; 
-•	ошибка; 
-•	короткий вызов; 
-•	сброс до начала сообщения. 
-________________________________________
-16. Остановка обзвона
-Доступно:
-•	Оператор 
-•	Администратор 
-Режимы:
-Мягкая остановка
-Новые звонки не запускать, активные завершить.
-Экстренная остановка
-Сразу завершить активные вызовы.
-Логировать:
-•	кто остановил; 
-•	когда; 
-•	причина; 
-•	сколько вызовов завершено. 
-________________________________________
-17. Контроль линий АТС
-WEB Dashboard показывает:
-Показатель	Значение
-Всего каналов	X
-Используется сейчас	X
-Свободно	X
-Использует ГО-ЧС	X
-Входящих сейчас	X
-Исходящих сейчас	X
-________________________________________
-18. Входящие звонки
-Маршрут:
-Сотрудник → FreePBX → ГО-ЧС Asterisk
-Алгоритм:
-1.	Автоответ 
-2.	Проигрывание Playbook 
-3.	Сигнал 
-4.	Запись сообщения 
-5.	Сохранение WAV 
-6.	Расшифровка речи 
-7.	Отображение в WEB 
-________________________________________
-19. Playbook входящих звонков
-Пример:
+#!/bin/bash
+
+################################################################################
+# Модуль: 05-asterisk.sh
+# Назначение: Установка и настройка Asterisk 20 LTS
+# Версия: 1.0.2 (исправленная - полная версия)
+################################################################################
+
+# Определение путей
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Загрузка общих функций
+if [[ -f "${SCRIPT_DIR}/utils/common.sh" ]]; then
+    source "${SCRIPT_DIR}/utils/common.sh"
+fi
+
+# Если common.sh не найден - определяем функции локально
+if ! type log_info &>/dev/null; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+    
+    log_info() { echo -e "${GREEN}[INFO]${NC} $(date '+%H:%M:%S') $*"; }
+    log_warn() { echo -e "${YELLOW}[WARN]${NC} $(date '+%H:%M:%S') $*"; }
+    log_error() { echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $*"; }
+    log_step() { 
+        echo ""
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${BLUE}  $*${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    }
+    backup_file() { 
+        local file="$1"
+        if [[ -f "$file" ]]; then
+            cp "$file" "${file}.backup.$(date +%Y%m%d_%H%M%S)"
+            log_info "Создана резервная копия: $file"
+        fi
+    }
+    wait_for_service() { 
+        local service="$1"
+        local max_wait="${2:-30}"
+        local count=0
+        while ! systemctl is-active --quiet "$service" 2>/dev/null; do
+            sleep 1
+            ((count++))
+            [[ $count -ge $max_wait ]] && return 1
+        done
+        return 0
+    }
+    mark_module_installed() {
+        local module="$1"
+        local state_file="${INSTALL_DIR:-/opt/gochs-informing}/.modules_state"
+        mkdir -p "$(dirname "$state_file")"
+        echo "$module:$(date +%s)" >> "$state_file"
+    }
+    ensure_dir() {
+        local dir="$1"
+        if [[ ! -d "$dir" ]]; then
+            mkdir -p "$dir"
+        fi
+    }
+    generate_password() {
+        openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "ChangeMe$(date +%s)"
+    }
+fi
+
+MODULE_NAME="05-asterisk"
+MODULE_DESCRIPTION="Asterisk 20 LTS - ядро телефонии"
+
+# Загрузка конфигурации
+CONFIG_FILE="${SCRIPT_DIR}/config/config.env"
+if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+fi
+
+# Fallback: загрузка из .env
+if [[ -z "$ASTERISK_AMI_PASSWORD" ]] && [[ -f "$INSTALL_DIR/.env" ]]; then
+    source "$INSTALL_DIR/.env"
+fi
+
+# Fallback: парсинг из credentials
+if [[ -z "$ASTERISK_AMI_PASSWORD" ]] && [[ -f "/root/.gochs_credentials" ]]; then
+    ASTERISK_AMI_PASSWORD=$(grep -A 3 "ASTERISK:" /root/.gochs_credentials | grep "AMI пароль:" | grep -oP 'AMI пароль: \K.*')
+    ASTERISK_ARI_PASSWORD=$(grep -A 3 "ASTERISK:" /root/.gochs_credentials | grep "ARI пароль:" | grep -oP 'ARI пароль: \K.*')
+    FREEPBX_PASSWORD=$(grep -A 4 "FREE PBX:" /root/.gochs_credentials | grep "Пароль:" | grep -oP 'Пароль: \K.*')
+fi
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+DOMAIN_OR_IP="${DOMAIN_OR_IP:-localhost}"
+FREEPBX_HOST="${FREEPBX_HOST:-192.168.1.10}"
+FREEPBX_PORT="${FREEPBX_PORT:-5060}"
+FREEPBX_EXTENSION="${FREEPBX_EXTENSION:-gochs}"
+FREEPBX_USERNAME="${FREEPBX_USERNAME:-gochs}"
+FREEPBX_PASSWORD="${FREEPBX_PASSWORD:-changeme}"
+ASTERISK_AMI_PORT="${ASTERISK_AMI_PORT:-5038}"
+ASTERISK_AMI_USER="${ASTERISK_AMI_USER:-gochs_ami}"
+ASTERISK_AMI_PASSWORD="${ASTERISK_AMI_PASSWORD:-$(generate_password)}"
+ASTERISK_ARI_PASSWORD="${ASTERISK_ARI_PASSWORD:-$(generate_password)}"
+ASTERISK_ADMIN_PASSWORD="${ASTERISK_ADMIN_PASSWORD:-$(generate_password)}"
+ASTERISK_MONITOR_PASSWORD="${ASTERISK_MONITOR_PASSWORD:-$(generate_password)}"
+GOCHS_USER="${GOCHS_USER:-gochs}"
+GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
+
+# Версия Asterisk
+ASTERISK_VERSION="20"
+ASTERISK_FALLBACK_VERSION="20.11.1"
+ASTERISK_FULL_VERSION="20.11.0"
+ASTERISK_DOWNLOAD_URL="http://downloads.asterisk.org/pub/telephony/asterisk"
+
+# ============================================================================
+# ИСПРАВЛЕНИЕ 1: Функция проверки доступности версии и автоопределения
+# ============================================================================
+check_version_availability() {
+    log_info "Проверка доступности Asterisk $ASTERISK_FULL_VERSION..."
+    
+    # Проверяем существование файла
+    if wget --spider --timeout=10 "$ASTERISK_DOWNLOAD_URL/asterisk-${ASTERISK_FULL_VERSION}.tar.gz" 2>/dev/null; then
+        log_info "Версия $ASTERISK_FULL_VERSION доступна"
+        return 0
+    fi
+    
+    log_warn "Версия $ASTERISK_FULL_VERSION не найдена на сервере"
+    
+    # Пытаемся получить список доступных версий
+    local latest_version=$(wget -q -O- http://downloads.asterisk.org/pub/telephony/asterisk/ 2>/dev/null | \
+                          grep -oP "asterisk-20\.\d+\.\d+" | \
+                          sort -V | tail -1 | cut -d'-' -f2)
+    
+    if [[ -n "$latest_version" ]]; then
+        ASTERISK_FULL_VERSION="$latest_version"
+        log_info "Найдена актуальная версия: $ASTERISK_FULL_VERSION"
+        return 0
+    fi
+    
+    # Альтернативные версии
+    local fallbacks=("20.11.1" "20.10.0" "20.9.0" "20.8.0" "20.7.0")
+    for ver in "${fallbacks[@]}"; do
+        if wget --spider --timeout=5 "$ASTERISK_DOWNLOAD_URL/asterisk-${ver}.tar.gz" 2>/dev/null; then
+            ASTERISK_FULL_VERSION="$ver"
+            log_info "Используем fallback версию: $ASTERISK_FULL_VERSION"
+            return 0
+        fi
+    done
+    
+    log_error "Не удалось найти доступную версию Asterisk 20"
+    return 1
+}
+
+install() {
+    log_step "Установка Asterisk $ASTERISK_VERSION LTS"
+    
+    # Проверка зависимостей
+    check_dependencies
+    
+    # ИСПРАВЛЕНИЕ: Проверка доступности версии перед установкой
+    check_version_availability || return 1
+    
+    # Установка Asterisk
+    install_asterisk
+    
+    # Настройка Asterisk
+    configure_asterisk
+    
+    # Создание директорий для ГО-ЧС
+    create_directories
+    
+    # Настройка systemd службы
+    configure_systemd
+    
+    # Запуск Asterisk
+    start_asterisk
+    
+    # Создание скриптов управления
+    create_management_scripts
+    
+    # Настройка интеграции с API
+    setup_api_integration
+    
+    # Отметка об установке
+    mark_module_installed "$MODULE_NAME"
+    
+    log_info "Модуль ${MODULE_NAME} успешно установлен"
+    log_info "Asterisk версия: $ASTERISK_FULL_VERSION"
+    log_info "AMI порт: $ASTERISK_AMI_PORT"
+    log_info "AMI пользователь: $ASTERISK_AMI_USER"
+    
+    return 0
+}
+
+check_dependencies() {
+    log_info "Проверка зависимостей..."
+    
+    # Проверка прав root
+    if [[ $EUID -ne 0 ]]; then
+        log_error "Скрипт должен запускаться от root!"
+        return 1
+    fi
+    
+    # Проверка наличия необходимых инструментов
+    local missing_tools=""
+    for tool in wget tar make gcc; do
+        if ! command -v $tool &>/dev/null; then
+            missing_tools="$missing_tools $tool"
+        fi
+    done
+    
+    if [[ -n "$missing_tools" ]]; then
+        log_warn "Установка недостающих инструментов:$missing_tools"
+        apt-get update -qq
+        apt-get install -y $missing_tools
+    fi
+    
+    log_info "Зависимости проверены"
+}
+
+install_asterisk() {
+    log_info "Установка Asterisk $ASTERISK_FULL_VERSION..."
+    
+    # Проверка, установлен ли уже Asterisk
+    if command -v asterisk &> /dev/null; then
+        ASTERISK_VER=$(asterisk -V 2>/dev/null | grep -oP 'Asterisk \K[0-9.]+' || echo "unknown")
+        log_info "Asterisk уже установлен (версия $ASTERISK_VER)"
+        
+        # Проверка версии
+        if [[ "$ASTERISK_VER" == "20."* ]]; then
+            log_info "Версия Asterisk 20 LTS - OK"
+            return 0
+        else
+            log_warn "Установлена версия $ASTERISK_VER, рекомендуется 20 LTS"
+            read -p "Переустановить Asterisk? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                return 0
+            fi
+        fi
+    fi
+    
+    # Установка зависимостей для компиляции
+    log_info "Установка зависимостей для компиляции..."
+    apt-get update -qq
+    apt-get install -y \
+        wget build-essential subversion git \
+        libjansson-dev libxml2-dev libncurses5-dev libsqlite3-dev \
+        libssl-dev libsrtp2-dev uuid-dev libedit-dev libpcap-dev \
+        libspandsp-dev libopenr2-dev libiksemel-dev libcurl4-openssl-dev \
+        libical-dev libneon27-dev libgmime-3.0-dev liburiparser-dev \
+        libpq-dev libmariadb-dev libsnmp-dev libldap2-dev \
+        libpopt-dev libnewt-dev libtiff-dev libresample1-dev libltdl-dev \
+        libvorbis-dev libogg-dev libopus-dev libgsm1-dev \
+        libspeex-dev libspeexdsp-dev libsndfile1-dev unixodbc-dev \
+        libsrtp2-dev libspandsp-dev libopenr2-dev \
+        libgmime-3.0-dev liburiparser-dev 2>/dev/null || true
+
+    # Скачивание Asterisk
+    log_info "Скачивание Asterisk $ASTERISK_FULL_VERSION..."
+    cd /usr/src
+    
+    # Удаление старых архивов если есть
+    rm -rf asterisk-${ASTERISK_FULL_VERSION}* 2>/dev/null || true
+    
+    # ИСПРАВЛЕНИЕ 2: Добавлены дополнительные зеркала
+    local download_success=false
+    local mirrors=(
+        "$ASTERISK_DOWNLOAD_URL/asterisk-${ASTERISK_FULL_VERSION}.tar.gz"
+        "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_FULL_VERSION}.tar.gz"
+        "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_FULL_VERSION}.tar.gz"
+        "https://downloads.asterisk.org/pub/telephony/asterisk/old-releases/asterisk-${ASTERISK_FULL_VERSION}.tar.gz"
+    )
+    
+    for mirror in "${mirrors[@]}"; do
+        log_info "Попытка скачать с: $mirror"
+        if wget -q --show-progress --timeout=30 "$mirror" 2>/dev/null; then
+            download_success=true
+            break
+        fi
+    done
+    
+    if [[ "$download_success" != "true" ]]; then
+        log_error "Не удалось скачать Asterisk. Проверьте версию."
+        return 1
+    fi
+    
+    # Распаковка
+    log_info "Распаковка архива..."
+    tar xzf asterisk-${ASTERISK_FULL_VERSION}.tar.gz
+    cd asterisk-${ASTERISK_FULL_VERSION}
+    
+    # Конфигурация
+    log_info "Конфигурация Asterisk..."
+    ./configure \
+        --with-jansson-bundled \
+        --with-pjproject-bundled \
+        --with-srtp \
+        --with-ssl \
+        --with-ogg \
+        --with-vorbis \
+        --with-opus \
+        --with-speex \
+        --with-gsm \
+        --with-sndfile 2>&1 | tee /tmp/asterisk_configure.log
+    
+    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+        log_error "Ошибка конфигурации Asterisk"
+        tail -20 /tmp/asterisk_configure.log
+        return 1
+    fi
+    
+    # Настройка menuselect
+    log_info "Настройка модулей..."
+    make menuselect.makeopts
+    menuselect/menuselect --enable chan_pjsip --enable app_macro --enable app_playback \
+        --enable codec_opus --enable codec_g729 --enable res_srtp \
+        --enable res_ari --enable res_ari_applications --enable res_ari_channels \
+        menuselect.makeopts 2>/dev/null || true
+    
+    # Сборка
+    log_info "Сборка Asterisk (это может занять 10-15 минут)..."
+    make -j$(nproc) 2>&1 | tee /tmp/asterisk_make.log
+    
+    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+        log_error "Ошибка сборки Asterisk"
+        tail -20 /tmp/asterisk_make.log
+        return 1
+    fi
+    
+    # Установка
+    log_info "Установка Asterisk..."
+    make install
+    make samples
+    make config
+    make install-logrotate
+    
+    # Установка звуковых файлов
+    log_info "Установка звуковых файлов..."
+    make install sounds/ru 2>/dev/null || log_warn "Русские звуковые файлы не установлены"
+    
+    # Создание пользователя asterisk
+    if ! id -u asterisk &>/dev/null; then
+        useradd -r -d /var/lib/asterisk -s /sbin/nologin asterisk
+        log_info "Пользователь asterisk создан"
+    fi
+    
+    # Добавление пользователя в группы
+    usermod -aG audio asterisk 2>/dev/null || true
+    usermod -aG "$GOCHS_GROUP" asterisk 2>/dev/null || true
+    
+    # Установка прав
+    chown -R asterisk:asterisk /var/lib/asterisk
+    chown -R asterisk:asterisk /var/log/asterisk
+    chown -R asterisk:asterisk /var/spool/asterisk
+    chown -R asterisk:asterisk /usr/lib/asterisk
+    
+    # Очистка
+    cd /
+    rm -rf /usr/src/asterisk-${ASTERISK_FULL_VERSION}*
+
+      # ============================================================
+    # Установка русских звуковых файлов Asterisk (ИСПРАВЛЕНО)
+    # ============================================================
+    log_info "Установка русских звуковых файлов Asterisk..."
+    cd /var/lib/asterisk/sounds
+
+    # Создаем директорию для русского языка
+    mkdir -p /var/lib/asterisk/sounds/ru
+
+    # Скачиваем базовые звуки на русском
+    log_info "Загрузка asterisk-core-sounds-ru-wav-current.tar.gz..."
+    if ! wget -q --show-progress --timeout=30 https://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-ru-wav-current.tar.gz 2>/dev/null; then
+        log_warn "Не удалось скачать с основного зеркала, пробуем альтернативное..."
+        if ! wget -q --show-progress --timeout=30 http://downloads.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-ru-wav-current.tar.gz 2>/dev/null; then
+            log_warn "Не удалось скачать русские звуки. Продолжаем без них."
+        fi
+    fi
+
+    # Распаковываем если архив существует
+    if [ -f asterisk-core-sounds-ru-wav-current.tar.gz ]; then
+        log_info "Распаковка русских звуковых файлов..."
+        tar -xzf asterisk-core-sounds-ru-wav-current.tar.gz
+        rm -f asterisk-core-sounds-ru-wav-current.tar.gz
+        
+        # Перемещаем файлы в правильную директорию если они распаковались в поддиректорию
+        if [ -d "ru" ]; then
+            mv ru/* . 2>/dev/null || true
+        fi
+        
+        log_info "Русские звуковые файлы установлены"
+    fi
+
+    # Устанавливаем права на все звуковые файлы
+    chown -R asterisk:asterisk /var/lib/asterisk/sounds/
+    chmod -R 755 /var/lib/asterisk/sounds/
+    
+    # ============================================================
+    # Генерация аудио Playbook через TTS (ИСПРАВЛЕНО)
+    # ============================================================
+    if [ -f /opt/gochs-informing/playbooks/welcome.txt ]; then
+        log_info "Генерация аудио Playbook через TTS..."
+        
+        # Устанавливаем espeak если его нет
+        if ! command -v espeak &> /dev/null; then
+            log_info "Установка espeak для синтеза речи..."
+            apt-get update -qq
+            apt-get install -y espeak sox 2>/dev/null || true
+            apt-get install -y espeak espeak-data 2>/dev/null || {
+                log_warn "Не удалось установить espeak. Пропускаем генерацию аудио."
+            }
+        fi
+        
+        # Генерируем WAV файл из текста
+        if command -v espeak &> /dev/null; then
+            log_info "Синтез речи через espeak..."
+            espeak -v ru -s 150 -p 50 -f /opt/gochs-informing/playbooks/welcome.txt -w /opt/gochs-informing/playbooks/welcome.wav
+            
+            # Проверяем что файл создан
+            if [ -f /opt/gochs-informing/playbooks/welcome.wav ]; then
+                # Конвертируем в формат совместимый с Asterisk (8kHz, mono)
+                if command -v sox &> /dev/null; then
+                    sox /opt/gochs-informing/playbooks/welcome.wav -r 8000 -c 1 -b 16 /opt/gochs-informing/playbooks/welcome_8k.wav
+                    mv /opt/gochs-informing/playbooks/welcome_8k.wav /opt/gochs-informing/playbooks/welcome.wav
+                fi
+                
+                chown asterisk:asterisk /opt/gochs-informing/playbooks/welcome.wav
+                chmod 644 /opt/gochs-informing/playbooks/welcome.wav
+                log_info "Аудио Playbook создан: /opt/gochs-informing/playbooks/welcome.wav"
+            else
+                log_warn "Не удалось создать аудио Playbook"
+            fi
+        else
+            log_warn "espeak не установлен, аудио Playbook не создан"
+        fi
+    else
+        log_warn "Файл /opt/gochs-informing/playbooks/welcome.txt не найден"
+    fi
+    
+    log_info "Asterisk $ASTERISK_FULL_VERSION установлен"
+}
+
+configure_asterisk() {
+    log_info "Настройка конфигурации Asterisk..."
+    
+    local asterisk_conf_dir="/etc/asterisk"
+    
+    # Создание директорий если нет
+    mkdir -p "$asterisk_conf_dir"
+    
+    # Резервное копирование оригинальных конфигураций
+    for conf in asterisk.conf http.conf manager.conf pjsip.conf extensions.conf modules.conf logger.conf rtp.conf; do
+        backup_file "$asterisk_conf_dir/$conf"
+    done
+    
+    # asterisk.conf
+    cat > "$asterisk_conf_dir/asterisk.conf" << EOF
+[directories]
+astetcdir => /etc/asterisk
+astmoddir => /usr/lib/asterisk/modules
+astvarlibdir => /var/lib/asterisk
+astdbdir => /var/lib/asterisk
+astkeydir => /var/lib/asterisk
+astdatadir => /var/lib/asterisk
+astagidir => /var/lib/asterisk/agi-bin
+astspooldir => /var/spool/asterisk
+astrundir => /var/run/asterisk
+astlogdir => /var/log/asterisk
+astsbindir => /usr/sbin
+
+[options]
+verbose = 3
+debug = 0
+alwaysfork = yes
+nofork = no
+quiet = no
+timestamp = yes
+execincludes = yes
+internal_timing = yes
+systemname = gochs-pbx
+languageprefix = yes
+maxcalls = 100
+maxload = 0.9
+minmemfree = 100
+
+[compat]
+pbx_realtime = 1.6
+res_agi = 1.6
+app_set = 1.6
+
+[files]
+astctlpermissions = 0660
+astctlowner = asterisk
+astctlgroup = asterisk
+astctl = asterisk.ctl
+EOF
+
+    # http.conf (для ARI)
+    cat > "$asterisk_conf_dir/http.conf" << EOF
+[general]
+enabled = yes
+bindaddr = 127.0.0.1
+bindport = 8088
+tlsenable = no
+prefix = ari
+enablestatic = yes
+sessionlimit = 100
+
+[gochs]
+read_only = no
+password_format = plain
+password = $ASTERISK_ARI_PASSWORD
+EOF
+
+    # manager.conf (AMI)
+    cat > "$asterisk_conf_dir/manager.conf" << EOF
+[general]
+enabled = yes
+port = $ASTERISK_AMI_PORT
+bindaddr = 127.0.0.1
+displayconnects = yes
+timestampevents = yes
+webenabled = yes
+httptimeout = 60
+
+[$ASTERISK_AMI_USER]
+secret = $ASTERISK_AMI_PASSWORD
+deny = 0.0.0.0/0.0.0.0
+permit = 127.0.0.1/255.255.255.255
+read = all
+write = all
+eventfilter = Event: Newchannel
+eventfilter = Event: Hangup
+eventfilter = Event: Dial
+eventfilter = Event: Bridge
+EOF
+
+    # pjsip.conf
+    cat > "$asterisk_conf_dir/pjsip.conf" << EOF
+[global]
+debug = no
+endpoint_identifier_order = ip,username,anonymous
+user_agent = Yealink SIP-T31G 124.86.0.20
+
+[transport-udp]
+type = transport
+protocol = udp
+bind = 0.0.0.0:5060
+external_media_address = $DOMAIN_OR_IP
+external_signaling_address = $DOMAIN_OR_IP
+
+[transport-tcp]
+type = transport
+protocol = tcp
+bind = 0.0.0.0:5060
+external_media_address = $DOMAIN_OR_IP
+external_signaling_address = $DOMAIN_OR_IP
+
+; =====================================================
+; РЕГИСТРАЦИЯ НА FREE PBX (как телефон)
+; =====================================================
+[freepbx-registration]
+type = registration
+outbound_auth = freepbx-auth
+server_uri = sip:$FREEPBX_HOST:$FREEPBX_PORT
+client_uri = sip:$FREEPBX_EXTENSION@$FREEPBX_HOST:$FREEPBX_PORT
+contact_user = $FREEPBX_EXTENSION
+retry_interval = 30
+expiration = 3600
+
+[freepbx-auth]
+type = auth
+auth_type = userpass
+username = $FREEPBX_USERNAME
+password = $FREEPBX_PASSWORD
+realm = asterisk
+
+; =====================================================
+; ЭНДПОИНТ - ВЕДЁТ СЕБЯ КАК ТЕЛЕФОН
+; =====================================================
+[freepbx]
+type = endpoint
+context = gochs-inbound
+aors = freepbx-aor
+outbound_auth = freepbx-auth
+disallow = all
+allow = ulaw
+allow = alaw
+allow = g729
+allow = opus
+dtmf_mode = rfc4733
+rtp_symmetric = yes
+force_rport = yes
+rewrite_contact = yes
+direct_media = no
+allow_unauthenticated_options = yes
+callerid = "GOCHS" <$FREEPBX_EXTENSION>
+from_user = $FREEPBX_EXTENSION
+from_domain = $FREEPBX_HOST
+timers = yes
+timers_min_se = 90
+timers_sess_expires = 1800
+
+[freepbx-aor]
+type = aor
+contact = sip:$FREEPBX_HOST:$FREEPBX_PORT
+max_contacts = 1
+remove_existing = yes
+
+[freepbx-identify]
+type = identify
+endpoint = freepbx
+match = $FREEPBX_HOST
+EOF
+
+    # extensions.conf
+    cat > "$asterisk_conf_dir/extensions.conf" << 'EOF'
+[globals]
+GOCHS_RECORDING_DIR = /opt/gochs-informing/recordings
+GOCHS_PLAYBOOK_DIR = /opt/gochs-informing/playbooks
+GOCHS_VOICE_DIR = /opt/gochs-informing/generated_voice
+
+[default]
+
+[gochs-inbound]
+exten => _X.,1,NoOp(Входящий звонок от ${CALLERID(num)})
+ same => n,Answer()
+ same => n,Wait(1)
+ same => n,Playback(${GOCHS_PLAYBOOK_DIR}/welcome)
+ same => n,Playback(beep)
+ same => n,Set(FILENAME=${STRFTIME(${EPOCH},,%Y%m%d_%H%M%S)}_${CALLERID(num)})
+ same => n,Record(${GOCHS_RECORDING_DIR}/${FILENAME}.wav,10,120,sk)
+ same => n,Hangup()
+
+[gochs-outbound]
+exten => _X.,1,NoOp(Исходящий звонок на ${EXTEN})
+ same => n,Set(CALLERID(all)=GOCHS <$FREEPBX_EXTENSION>)
+ same => n,Dial(PJSIP/${EXTEN}@freepbx,30)
+ same => n,Hangup()
+
+[gochs-dialer]
+exten => s,1,NoOp(Массовый обзвон - сценарий ${SCENARIO_ID})
+ same => n,Answer()
+ same => n,Wait(1)
+ same => n,Playback(${GOCHS_VOICE_DIR}/scenario_${SCENARIO_ID})
+ same => n,Hangup()
+EOF
+
+    # modules.conf
+    cat > "$asterisk_conf_dir/modules.conf" << 'EOF'
+[modules]
+autoload = yes
+
+; Отключаем устаревшие модули
+noload => chan_sip.so
+noload => chan_skinny.so
+noload => chan_mgcp.so
+noload => chan_oss.so
+noload => chan_alsa.so
+noload => chan_console.so
+
+; Включаем PJSIP
+load => res_pjsip.so
+load => res_pjsip_authenticator_digest.so
+load => res_pjsip_endpoint_identifier_ip.so
+load => res_pjsip_outbound_registration.so
+load => chan_pjsip.so
+
+; Аудио кодеки
+load => codec_ulaw.so
+load => codec_alaw.so
+load => codec_g729.so
+load => codec_opus.so
+load => codec_gsm.so
+load => format_wav.so
+
+; Функции
+load => func_callerid.so
+load => func_channel.so
+load => func_strings.so
+load => func_timeout.so
+
+; Приложения
+load => app_dial.so
+load => app_playback.so
+load => app_mixmonitor.so
+load => app_record.so
+load => app_echo.so
+
+; Ресурсы
+load => res_agi.so
+load => res_ari.so
+load => res_http_websocket.so
+load => res_musiconhold.so
+load => res_srtp.so
+EOF
+
+    # logger.conf
+    cat > "$asterisk_conf_dir/logger.conf" << 'EOF'
+[general]
+dateformat = %F %T.%q
+
+[logfiles]
+console => notice,warning,error
+messages => notice,warning,error,verbose(3)
+full => notice,warning,error,debug,verbose(9)
+gochs => notice,warning,error,call,event
+
+[gochs]
+file = /var/log/asterisk/gochs
+levels = notice,warning,error,call,event
+EOF
+
+    # rtp.conf
+    cat > "$asterisk_conf_dir/rtp.conf" << 'EOF'
+[general]
+rtpstart = 10000
+rtpend = 20000
+rtpchecksums = no
+strictrtp = yes
+EOF
+
+    log_info "Конфигурация Asterisk создана"
+}
+
+create_directories() {
+    log_info "Создание директорий для ГО-ЧС..."
+    
+    # Директории Asterisk
+    mkdir -p /var/run/asterisk
+    mkdir -p /var/log/asterisk
+    mkdir -p /var/lib/asterisk
+    mkdir -p /var/spool/asterisk
+    
+    # Права для Asterisk
+    chown -R asterisk:asterisk /var/run/asterisk 2>/dev/null || true
+    chown -R asterisk:asterisk /var/log/asterisk 2>/dev/null || true
+    chown -R asterisk:asterisk /var/lib/asterisk 2>/dev/null || true
+    chown -R asterisk:asterisk /var/spool/asterisk 2>/dev/null || true
+    chmod 755 /var/run/asterisk
+    
+    # Директории ГО-ЧС
+    mkdir -p "$INSTALL_DIR/recordings/inbound"
+    mkdir -p "$INSTALL_DIR/recordings/outbound"
+    mkdir -p "$INSTALL_DIR/playbooks"
+    mkdir -p "$INSTALL_DIR/generated_voice"
+    mkdir -p "$INSTALL_DIR/logs"
+    
+    # Установка прав
+    chown -R asterisk:asterisk "$INSTALL_DIR/recordings" 2>/dev/null || true
+    chown -R asterisk:asterisk "$INSTALL_DIR/playbooks" 2>/dev/null || true
+    chown -R asterisk:asterisk "$INSTALL_DIR/generated_voice" 2>/dev/null || true
+    chmod 755 "$INSTALL_DIR/recordings"
+    chmod 755 "$INSTALL_DIR/playbooks"
+    chmod 755 "$INSTALL_DIR/generated_voice"
+    
+    # Создание тестового приветствия
+    if [[ ! -f "$INSTALL_DIR/playbooks/welcome.wav" ]]; then
+        cat > "$INSTALL_DIR/playbooks/welcome.txt" << EOF
 Здравствуйте.
-Вы позвонили в систему ГО-ЧС информирования предприятия.
-После сигнала оставьте сообщение.
-Только Администратор:
-•	создавать; 
-•	редактировать; 
-•	загружать WAV/MP3; 
-•	генерировать TTS; 
-•	делать активным. 
-________________________________________
-20. Расшифровка речи
-Использовать только offline решение:
-•	Vosk 
-WEB отображает:
-•	номер звонящего; 
-•	дата; 
-•	время; 
-•	длительность; 
-•	текст сообщения; 
-•	аудиофайл. 
-________________________________________
-21. WEB интерфейс
-Frontend:
-•	React 
-Backend API:
-•	FastAPI 
-Интерфейс должен быть адаптивным.
-________________________________________
-22. Роли пользователей
-Администратор
-Полный доступ:
-•	пользователи; 
-•	роли; 
-•	телефония; 
-•	контакты; 
-•	группы; 
-•	сценарии; 
-•	playbook; 
-•	запуск обзвона; 
-•	остановка; 
-•	резервные копии; 
-•	настройки; 
-•	аудит. 
-Оператор
-•	запуск обзвона; 
-•	остановка; 
-•	просмотр статусов; 
-•	входящие звонки; 
-•	сценарии; 
-•	контакты (ограниченно). 
-________________________________________
-23. Разделы WEB
-Dashboard
-•	состояние системы; 
-•	линии; 
-•	активные кампании; 
-•	последние входящие; 
-•	статистика. 
-Контакты
-Группы
-Сценарии
-Оповещение
-Входящие
-Playbook
-Пользователи
-Настройки
-Журналы
-________________________________________
-24. Backend архитектура
-/opt/gochs-informing/app/
+Вы позвонили в систему ГО и ЧС информирования предприятия.
+После звукового сигнала оставьте ваше сообщение.
+EOF
+        log_info "Создан текстовый файл приветствия"
+    fi
+    
+    log_info "Директории созданы"
+}
 
-main.py
-core/
-api/
-models/
-schemas/
-services/
-tasks/
-utils/
-services:
-asterisk/
-pbx/
-dialer/
-inbound/
-tts/
-stt/
-reports/
-security/
-________________________________________
-25. База данных
-PostgreSQL хранит:
-•	пользователей; 
-•	роли; 
-•	контакты; 
-•	группы; 
-•	сценарии; 
-•	кампании обзвона; 
-•	попытки вызовов; 
-•	входящие звонки; 
-•	playbook; 
-•	настройки; 
-•	журналы действий. 
-________________________________________
-26. Очереди задач
-Redis используется для:
-•	очередь обзвона; 
-•	повторы; 
-•	фоновые задачи; 
-•	websocket обновления; 
-•	события Asterisk. 
-________________________________________
-27. systemd службы
-asterisk.service
-gochs-api.service
-gochs-worker.service
-gochs-scheduler.service
-gochs-websocket.service
-postgresql.service
-redis.service
-nginx.service
-________________________________________
-28. Каталоги проекта
-/opt/gochs-informing/
+configure_systemd() {
+    log_info "Настройка systemd службы Asterisk..."
+    
+cat > /etc/systemd/system/asterisk.service << 'EOF'
+[Unit]
+Description=Asterisk PBX
+Documentation=man:asterisk(8)
+After=network.target
+Wants=network.target
 
-app/
-frontend/
-logs/
-recordings/
-generated_voice/
-playbooks/
-backups/
-installer/
-exports/
-venv/
-________________________________________
-29. Безопасность
-•	HTTPS 
-•	JWT 
-•	refresh token 
-•	RBAC 
-•	лог входов 
-•	аудит действий 
-•	блокировка brute force 
-•	резервные копии 
-•	ограничение IP (опционально) 
-________________________________________
-30. Производительность
-Минимум:
-•	CPU 4 cores 
-•	RAM 8 GB 
-•	SSD 100 GB 
-Рекомендуется:
-•	CPU 8 cores 
-•	RAM 16 GB 
-•	SSD NVMe 
-________________________________________
-31. Мониторинг
-•	загрузка CPU 
-•	RAM 
-•	диск 
-•	состояние Asterisk 
-•	регистрация FreePBX 
-•	количество звонков 
-•	ошибки сервиса 
-________________________________________
-32. Резервное копирование
-Автоматически:
-•	PostgreSQL 
-•	настройки 
-•	сценарии 
-•	контакты 
-•	playbook 
-•	журналы 
-________________________________________
-33. Этап 0 — Установка
-Через:
-install.sh
-Модульная установка:
-•	system 
-•	python 
-•	asterisk 
-•	backend 
-•	frontend 
-•	db 
-•	redis 
-•	nginx 
-________________________________________
-34. Критерии приемки
-Система считается готовой если:
-•	ставится на чистый Debian 12; 
-•	регистрируется в FreePBX по PJSIP; 
-•	делает 20+ вызовов одновременно; 
-•	выполняет повторы; 
-•	принимает входящие; 
-•	воспроизводит playbook; 
-•	пишет запись; 
-•	переводит голос в текст; 
-•	WEB работает; 
-•	роли работают; 
-•	логи ведутся. 
-________________________________________
-35. Результат внедрения
-Предприятие получает полностью автономную профессиональную систему ГО-ЧС информирования с современным WEB управлением и собственной телефонией на Asterisk.
+[Service]
+Type=forking
+Environment=HOME=/var/lib/asterisk
+WorkingDirectory=/var/lib/asterisk
+User=asterisk
+Group=asterisk
+ExecStart=/usr/sbin/asterisk -g -f -p -U asterisk -G asterisk
+ExecStop=/usr/sbin/asterisk -rx 'core stop gracefully'
+ExecReload=/usr/sbin/asterisk -rx 'core reload'
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+LimitNPROC=32768
+UMask=0007
 
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    log_info "Systemd служба создана"
+}
+
+start_asterisk() {
+    log_info "Запуск Asterisk..."
+    
+    systemctl enable asterisk
+    systemctl restart asterisk
+    
+    # Ожидание запуска
+    sleep 5
+    
+    if systemctl is-active --quiet asterisk; then
+        log_info "Asterisk успешно запущен"
+        
+        # Проверка версии
+        asterisk -rx "core show version" 2>/dev/null | head -1
+
+        # Проверка регистрации на FreePBX
+        log_info "Проверка регистрации на FreePBX..."
+        sleep 3
+        if asterisk -rx "pjsip show registrations" 2>/dev/null | grep -q "freepbx.*Registered"; then
+            log_info "✓ Регистрация на FreePBX успешна"
+        else
+            log_warn "✗ Регистрация на FreePBX не удалась"
+            log_warn "  Проверьте настройки в config.env:"
+            log_warn "  FREEPBX_HOST=$FREEPBX_HOST:$FREEPBX_PORT"
+            log_warn "  FREEPBX_EXTENSION=$FREEPBX_EXTENSION"
+            log_warn "  FREEPBX_USERNAME=$FREEPBX_USERNAME"
+        fi
+    else
+        log_error "Проблема с запуском Asterisk"
+        systemctl status asterisk --no-pager -l
+        return 1
+    fi
+}
+
+create_management_scripts() {
+    log_info "Создание скриптов управления Asterisk..."
+    
+    mkdir -p "$INSTALL_DIR/scripts"
+    
+    # Скрипт для подключения к консоли
+    cat > "$INSTALL_DIR/scripts/asterisk_console.sh" << 'EOF'
+#!/bin/bash
+asterisk -rvvvv
+EOF
+
+    # Скрипт для проверки статуса
+    cat > "$INSTALL_DIR/scripts/asterisk_status.sh" << 'EOF'
+#!/bin/bash
+echo "=== Статус Asterisk ==="
+asterisk -rx "core show uptime" 2>/dev/null || echo "Asterisk не запущен"
+echo
+asterisk -rx "core show channels" 2>/dev/null
+echo
+asterisk -rx "pjsip show registrations" 2>/dev/null
+echo
+asterisk -rx "pjsip show endpoints" 2>/dev/null
+EOF
+
+    # Скрипт для просмотра активных звонков
+    cat > "$INSTALL_DIR/scripts/asterisk_active_calls.sh" << 'EOF'
+#!/bin/bash
+watch -n 1 'asterisk -rx "core show channels concise" 2>/dev/null | column -t -s "!"'
+EOF
+
+    # Скрипт для перезагрузки конфигурации
+    cat > "$INSTALL_DIR/scripts/asterisk_reload.sh" << 'EOF'
+#!/bin/bash
+echo "Перезагрузка конфигурации Asterisk..."
+asterisk -rx "core reload" 2>/dev/null
+asterisk -rx "pjsip reload" 2>/dev/null
+asterisk -rx "dialplan reload" 2>/dev/null
+echo "Готово"
+EOF
+
+    # Скрипт для тестирования звонка
+    cat > "$INSTALL_DIR/scripts/asterisk_test_call.sh" << 'EOF'
+#!/bin/bash
+if [ -z "$1" ]; then
+    echo "Использование: $0 <номер>"
+    exit 1
+fi
+echo "Тестовый звонок на номер $1"
+asterisk -rx "channel originate PJSIP/$1@freepbx-outbound application Playback hello-world" 2>/dev/null
+EOF
+
+    # Скрипт для мониторинга
+    cat > "$INSTALL_DIR/scripts/asterisk_monitor.sh" << 'EOF'
+#!/bin/bash
+while true; do
+    clear
+    echo "=== МОНИТОРИНГ ASTERISK ==="
+    echo "Время: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo
+    asterisk -rx "core show channels count" 2>/dev/null
+    echo
+    asterisk -rx "pjsip show registrations" 2>/dev/null | grep freepbx
+    echo
+    tail -5 /var/log/asterisk/messages 2>/dev/null
+    sleep 5
+done
+EOF
+
+    chmod +x "$INSTALL_DIR"/scripts/asterisk_*.sh
+    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/scripts" 2>/dev/null || true
+    
+    log_info "Скрипты управления созданы в $INSTALL_DIR/scripts"
+}
+
+setup_api_integration() {
+    log_info "Настройка интеграции с API..."
+    
+    # Создание конфигурации ARI
+    cat > "/etc/asterisk/ari.conf" << EOF
+[general]
+enabled = yes
+pretty = yes
+allowed_origins = http://localhost:8000,https://$DOMAIN_OR_IP
+
+[gochs]
+type = user
+read_only = no
+password = $ASTERISK_ARI_PASSWORD
+password_format = plain
+EOF
+
+    # Создание Python скрипта для тестирования AMI (исправлено: socket вместо telnetlib)
+    cat > "$INSTALL_DIR/scripts/test_ami.py" << EOF
+#!/usr/bin/env python3
+import socket
+import sys
+
+def test_ami():
+    try:
+        # Подключение к AMI
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+        sock.connect(('127.0.0.1', $ASTERISK_AMI_PORT))
+        
+        # Читаем приветствие
+        data = sock.recv(1024).decode()
+        if 'Asterisk Call Manager' not in data:
+            print("✗ Не получено приветствие AMI")
+            return False
+        
+        # Логин
+        login_cmd = f"Action: Login\r\nUsername: $ASTERISK_AMI_USER\r\nSecret: $ASTERISK_AMI_PASSWORD\r\n\r\n"
+        sock.send(login_cmd.encode())
+        
+        response = sock.recv(1024).decode()
+        if 'Success' in response:
+            print("✓ AMI подключение успешно")
+            
+            # Ping
+            sock.send(b"Action: Ping\r\n\r\n")
+            ping_response = sock.recv(1024).decode()
+            if 'Success' in ping_response:
+                print("  Ping: OK")
+            
+            sock.send(b"Action: Logoff\r\n\r\n")
+            sock.close()
+            return True
+        else:
+            print("✗ Ошибка AMI подключения")
+            print(f"  Ответ: {response[:100]}")
+            return False
+            
+    except Exception as e:
+        print(f"✗ Ошибка: {e}")
+        return False
+
+if __name__ == "__main__":
+    test_ami()
+EOF
+
+    chmod +x "$INSTALL_DIR/scripts/test_ami.py"
+    chown "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/scripts/test_ami.py" 2>/dev/null || true
+    
+    log_info "Интеграция с API настроена"
+}
+
+uninstall() {
+    log_step "Удаление модуля ${MODULE_NAME}"
+    
+    # Остановка сервиса
+    systemctl stop asterisk 2>/dev/null
+    systemctl disable asterisk 2>/dev/null
+    
+    # Удаление файлов службы
+    rm -f /etc/systemd/system/asterisk.service
+    systemctl daemon-reload
+    
+    # Удаление файлов Asterisk
+    read -p "Удалить Asterisk полностью? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -rf /usr/lib/asterisk
+        rm -rf /var/lib/asterisk
+        rm -rf /var/spool/asterisk
+        rm -rf /var/log/asterisk
+        rm -rf /etc/asterisk
+        rm -f /usr/sbin/asterisk
+        rm -f /usr/sbin/astgenkey
+        rm -f /usr/sbin/autosupport
+        
+        # Удаление пользователя
+        userdel asterisk 2>/dev/null || true
+        
+        log_info "Asterisk полностью удален"
+    fi
+    
+    # Удаление скриптов
+    rm -f "$INSTALL_DIR"/scripts/asterisk_*.sh
+    rm -f "$INSTALL_DIR"/scripts/test_ami.py
+    
+    log_info "Модуль ${MODULE_NAME} удален"
+    return 0
+}
+
+check_status() {
+    local status=0
+    
+    log_info "Проверка статуса модуля ${MODULE_NAME}"
+    
+    # Проверка сервиса
+    if systemctl is-active --quiet asterisk; then
+        log_info "✓ Сервис Asterisk: активен"
+        
+        # Проверка версии
+        VERSION=$(asterisk -rx "core show version" 2>/dev/null | head -1)
+        log_info "  $VERSION"
+        
+        # Проверка uptime
+        UPTIME=$(asterisk -rx "core show uptime" 2>/dev/null | grep "System uptime")
+        log_info "  $UPTIME"
+        
+        # Проверка каналов
+        CHANNELS=$(asterisk -rx "core show channels" 2>/dev/null | grep "active channels")
+        log_info "  $CHANNELS"
+        
+        # Проверка регистрации на FreePBX
+        REGISTRATION=$(asterisk -rx "pjsip show registrations" 2>/dev/null | grep freepbx)
+        if echo "$REGISTRATION" | grep -q "Registered"; then
+            log_info "  ✓ FreePBX регистрация: Зарегистрирован"
+        else
+            log_warn "  ✗ FreePBX регистрация: Не зарегистрирован"
+            status=1
+        fi
+        
+        # Проверка AMI
+        if grep -q "^\[$ASTERISK_AMI_USER\]" /etc/asterisk/manager.conf 2>/dev/null; then
+            log_info "  ✓ AMI пользователь: Настроен"
+            
+            # Тест AMI
+            if python3 "$INSTALL_DIR/scripts/test_ami.py" 2>/dev/null | grep -q "успешно"; then
+                log_info "  ✓ AMI подключение: OK"
+            else
+                log_warn "  ✗ AMI подключение: Ошибка"
+                status=1
+            fi
+        fi
+        
+    else
+        log_error "✗ Сервис Asterisk: не активен"
+        status=1
+    fi
+    
+    return $status
+}
+
+# Обработка аргументов
+case "${1:-}" in
+    install)
+        install
+        ;;
+    uninstall)
+        uninstall
+        ;;
+    status)
+        check_status
+        ;;
+    console)
+        asterisk -rvvvv
+        ;;
+    reload)
+        asterisk -rx "core reload" 2>/dev/null
+        asterisk -rx "pjsip reload" 2>/dev/null
+        ;;
+    restart)
+        systemctl restart asterisk
+        ;;
+    logs)
+        tail -f /var/log/asterisk/messages
+        ;;
+    test)
+        if [[ -n "${2:-}" ]]; then
+            asterisk -rx "channel originate PJSIP/$2@freepbx-outbound application Playback hello-world" 2>/dev/null
+            echo "Тестовый звонок на $2"
+        else
+            echo "Использование: $0 test <номер>"
+        fi
+        ;;
+    *)
+        echo "Использование: $0 {install|uninstall|status|console|reload|restart|logs|test <номер>}"
+        exit 1
+        ;;
+esac
