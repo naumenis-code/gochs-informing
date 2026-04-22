@@ -1598,13 +1598,14 @@ build_frontend() {
     # Вывод размера сборки
     BUILD_SIZE=$(du -sh "$INSTALL_DIR/frontend/build" 2>/dev/null | cut -f1)
     log_info "✓ Фронтенд успешно собран (размер: $BUILD_SIZE)"
-    
-    # Установка прав
-    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/frontend/build" 2>/dev/null || true
-    chown -R www-data:www-data "$INSTALL_DIR/frontend/build" 2>/dev/null || true
-    chmod -R 755 "$INSTALL_DIR/frontend/build"
-    
+   
     cd "$SCRIPT_DIR"
+
+    # Установка прав для Nginx
+    log_info "Настройка прав на фронтенд..."
+    chown -R www-data:www-data "$INSTALL_DIR/frontend/build" 2>/dev/null || true
+    chmod -R 755 "$INSTALL_DIR/frontend/build" 2>/dev/null || true
+    log_info "✓ Права на фронтенд настроены"
 }
 
 uninstall() {
