@@ -1,745 +1,766 @@
 #!/usr/bin/env python3
-"""Settings endpoints - полная версия с применением настроек к Asterisk"""
+"""Settings schemas - ПОЛНАЯ версия со всеми исправлениями и дополнениями"""
 
-import os
-import re
-import logging
-import subprocess
-import socket
-from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, BackgroundTasks
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, ConfigDict
+from typing import Optional, List, Any, Dict, Union
+from enum import Enum
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
-router = APIRouter()
-
-# Пути к файлам конфигурации
-ENV_FILE = "/opt/gochs-informing/.env"
-CRED_FILE = "/root/.gochs_credentials"
-CONFIG_FILE = "/opt/gochs-informing/config/config.yaml"
-ASTERISK_PJSIP_CONF = "/etc/asterisk/pjsip.conf"
 
 # ============================================================================
-# ФУНКЦИИ РАБОТЫ С КОНФИГУРАЦИЕЙ
+# ENUMS
 # ============================================================================
 
-def read_env_value(key: str, default: str = "") -> str:
-    """Чтение значения из .env файла"""
-    try:
-        if os.path.exists(ENV_FILE):
-            with open(ENV_FILE, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith(f"{key}="):
-                        value = line.split('=', 1)[1].strip()
-                        if value.startswith('"') and value.endswith('"'):
-                            value = value[1:-1]
-                        elif value.startswith("'") and value.endswith("'"):
-                            value = value[1:-1]
-                        return value
-    except Exception as e:
-        logger.error(f"Error reading {key} from .env: {e}")
-    return default
+class TransportType(str, Enum):
+    """Тип транспорта для SIP"""
+    UDP = "udp"
+    TCP = "tcp"
+    TLS = "tls"
+    WS = "ws"
+    WSS = "wss"
 
 
-def write_env_value(key: str, value: str) -> bool:
-    """Запись значения в .env файл"""
-    try:
-        lines = []
-        found = False
-        
-        if os.path.exists(ENV_FILE):
-            with open(ENV_FILE, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        
-        with open(ENV_FILE, 'w', encoding='utf-8') as f:
-            for line in lines:
-                if line.startswith(f"{key}="):
-                    f.write(f"{key}={value}\n")
-                    found = True
-                else:
-                    f.write(line)
-            if not found:
-                f.write(f"{key}={value}\n")
-        return True
-    except Exception as e:
-        logger.error(f"Error writing {key} to .env: {e}")
-        return False
+class LogLevel(str, Enum):
+    """Уровень логирования"""
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
 
 
-def read_credentials() -> Dict[str, Any]:
-    """Чтение всех учетных данных из credentials файла"""
-    result = {
-        "freepbx": {"host": "", "port": 5060, "extension": "", "password": ""},
-        "postgresql": {"password": "", "database": "gochs", "user": "gochs_user"},
-        "redis": {"password": ""},
-        "asterisk": {"ami_user": "", "ami_password": "", "ari_password": ""}
-    }
-    
-    try:
-        if os.path.exists(CRED_FILE):
-            with open(CRED_FILE, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # FreePBX
-            freepbx_section = re.search(r'FREE PBX:(.*?)(?:РЕЖИМ SSL:|$)', content, re.DOTALL)
-            if freepbx_section:
-                section = freepbx_section.group(1)
-                
-                host_match = re.search(r'Хост:\s*([^\s\n]+)', section)
-                if host_match:
-                    hp = host_match.group(1)
-                    if ':' in hp:
-                        result["freepbx"]["host"], port = hp.split(':', 1)
-                        result["freepbx"]["port"] = int(port)
-                    else:
-                        result["freepbx"]["host"] = hp
-                
-                ext_match = re.search(r'Extension:\s*(\S+)', section)
-                if ext_match:
-                    result["freepbx"]["extension"] = ext_match.group(1)
-                
-                pass_match = re.search(r'Пароль:\s*(\S+)', section)
-                if pass_match:
-                    result["freepbx"]["password"] = pass_match.group(1)
-                    
-    except Exception as e:
-        logger.error(f"Error reading credentials: {e}")
-    
-    return result
+class Timezone(str, Enum):
+    """Часовые пояса"""
+    MOSCOW = "Europe/Moscow"
+    LONDON = "Europe/London"
+    BERLIN = "Europe/Berlin"
+    NEW_YORK = "America/New_York"
+    LOS_ANGELES = "America/Los_Angeles"
+    TOKYO = "Asia/Tokyo"
+    SHANGHAI = "Asia/Shanghai"
+    DUBAI = "Asia/Dubai"
+    UTC = "UTC"
 
 
-def get_freepbx_config() -> Dict[str, Any]:
-    """Получение полной конфигурации FreePBX"""
-    # Значения по умолчанию
-    config = {
-        "host": "192.168.1.10",
-        "port": 5060,
-        "extension": "gochs",
-        "username": "gochs",
-        "password": "",
-        "transport": "udp",
-        "max_channels": 20,
-        "codecs": ["ulaw", "alaw"],
-        "register_enabled": True
-    }
-    
-    # Читаем из credentials (там реальные настройки)
-    creds = read_credentials()
-    if creds["freepbx"]["host"]:
-        config["host"] = creds["freepbx"]["host"]
-        config["port"] = creds["freepbx"]["port"]
-    if creds["freepbx"]["extension"]:
-        config["extension"] = creds["freepbx"]["extension"]
-        config["username"] = creds["freepbx"]["extension"]
-    if creds["freepbx"]["password"]:
-        config["password"] = creds["freepbx"]["password"]
-    
-    # Дополняем из .env (если есть переопределения)
-    env_host = read_env_value("FREEPBX_HOST", "")
-    if env_host:
-        if ':' in env_host:
-            config["host"], port_str = env_host.split(':', 1)
-            config["port"] = int(port_str)
-        else:
-            config["host"] = env_host
-    
-    env_port = read_env_value("FREEPBX_PORT", "")
-    if env_port:
-        config["port"] = int(env_port)
-    
-    env_ext = read_env_value("FREEPBX_EXTENSION", "")
-    if env_ext:
-        config["extension"] = env_ext
-        config["username"] = env_ext
-    
-    env_pass = read_env_value("FREEPBX_PASSWORD", "")
-    if env_pass:
-        config["password"] = env_pass
-    
-    env_transport = read_env_value("FREEPBX_TRANSPORT", "")
-    if env_transport:
-        config["transport"] = env_transport
-    
-    env_max = read_env_value("MAX_CONCURRENT_CALLS", "")
-    if env_max:
-        config["max_channels"] = int(env_max)
-    
-    env_enabled = read_env_value("FREEPBX_ENABLED", "")
-    if env_enabled:
-        config["register_enabled"] = env_enabled.lower() == "true"
-    
-    env_codecs = read_env_value("FREEPBX_CODECS", "")
-    if env_codecs:
-        config["codecs"] = env_codecs.split(',')
-    
-    return config
+class CodecType(str, Enum):
+    """Типы кодеков"""
+    ULAW = "ulaw"
+    ALAW = "alaw"
+    G729 = "g729"
+    G722 = "g722"
+    OPUS = "opus"
+    GSM = "gsm"
+    SPEEX = "speex"
+    H264 = "h264"
+    VP8 = "vp8"
 
 
-def update_asterisk_pjsip_config(config: Dict[str, Any]) -> bool:
-    """Обновление конфигурации PJSIP в Asterisk"""
-    try:
-        if not os.path.exists(ASTERISK_PJSIP_CONF):
-            logger.warning(f"PJSIP config not found: {ASTERISK_PJSIP_CONF}")
-            return False
-        
-        # Читаем текущий конфиг
-        with open(ASTERISK_PJSIP_CONF, 'r') as f:
-            content = f.read()
-        
-        # Обновляем или добавляем секцию регистрации
-        registration_section = f"""; =====================================================
-; РЕГИСТРАЦИЯ НА FREE PBX (автоматически сгенерировано)
-; =====================================================
-[freepbx-registration]
-type = registration
-outbound_auth = freepbx-auth
-server_uri = sip:{config['host']}:{config['port']}
-client_uri = sip:{config['extension']}@{config['host']}:{config['port']}
-contact_user = {config['extension']}
-retry_interval = 30
-expiration = 3600
-
-[freepbx-auth]
-type = auth
-auth_type = userpass
-username = {config['extension']}
-password = {config['password']}
-realm = asterisk
-
-[freepbx]
-type = endpoint
-context = gochs-inbound
-aors = freepbx-aor
-outbound_auth = freepbx-auth
-disallow = all
-allow = {','.join(config['codecs'])}
-dtmf_mode = rfc4733
-rtp_symmetric = yes
-force_rport = yes
-rewrite_contact = yes
-direct_media = no
-callerid = "GOCHS" <{config['extension']}>
-from_user = {config['extension']}
-from_domain = {config['host']}
-
-[freepbx-aor]
-type = aor
-contact = sip:{config['host']}:{config['port']}
-max_contacts = 1
-remove_existing = yes
-
-[freepbx-identify]
-type = identify
-endpoint = freepbx
-match = {config['host']}
-"""
-        
-        # Ищем и заменяем секцию freepbx
-        import re
-        pattern = r'; =+.*?РЕГИСТРАЦИЯ НА FREE PBX.*?\[freepbx-identify\][^\[]*'
-        if re.search(pattern, content, re.DOTALL):
-            content = re.sub(pattern, registration_section, content, flags=re.DOTALL)
-        else:
-            # Добавляем в конец файла
-            content += "\n" + registration_section
-        
-        # Сохраняем
-        with open(ASTERISK_PJSIP_CONF, 'w') as f:
-            f.write(content)
-        
-        logger.info("Asterisk PJSIP config updated")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error updating PJSIP config: {e}")
-        return False
+class AuthMethod(str, Enum):
+    """Методы аутентификации"""
+    PASSWORD = "password"
+    MD5 = "md5"
+    SHA256 = "sha256"
+    SHA512 = "sha512"
 
 
-def reload_asterisk_pjsip() -> Dict[str, Any]:
-    """Перезагрузка PJSIP в Asterisk"""
-    result = {"success": False, "message": "", "details": ""}
-    
-    try:
-        # Способ 1: через asterisk -rx
-        cmd = ["asterisk", "-rx", "pjsip reload"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        
-        if proc.returncode == 0:
-            result["success"] = True
-            result["message"] = "PJSIP reloaded successfully"
-            result["details"] = proc.stdout
-            logger.info("PJSIP reloaded via asterisk -rx")
-            return result
-        
-        # Способ 2: через systemctl reload
-        cmd = ["systemctl", "reload", "asterisk"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        
-        if proc.returncode == 0:
-            result["success"] = True
-            result["message"] = "Asterisk reloaded via systemctl"
-            result["details"] = proc.stdout
-            logger.info("Asterisk reloaded via systemctl")
-            return result
-        
-        # Способ 3: через service
-        cmd = ["service", "asterisk", "reload"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        
-        if proc.returncode == 0:
-            result["success"] = True
-            result["message"] = "Asterisk reloaded via service"
-            result["details"] = proc.stdout
-            logger.info("Asterisk reloaded via service")
-            return result
-        
-        result["message"] = "All reload methods failed"
-        result["details"] = f"asterisk -rx: {proc.stdout}\n{proc.stderr}"
-        
-    except Exception as e:
-        result["message"] = f"Reload error: {str(e)}"
-        logger.error(f"PJSIP reload error: {e}")
-    
-    return result
+class BackupType(str, Enum):
+    """Типы резервного копирования"""
+    FULL = "full"
+    INCREMENTAL = "incremental"
+    DIFFERENTIAL = "differential"
+    SETTINGS_ONLY = "settings_only"
+    DATABASE_ONLY = "database_only"
+    RECORDINGS_ONLY = "recordings_only"
 
 
-def restart_asterisk_service() -> Dict[str, Any]:
-    """Полный перезапуск Asterisk"""
-    result = {"success": False, "message": "", "details": ""}
-    
-    try:
-        cmd = ["systemctl", "restart", "asterisk"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        
-        if proc.returncode == 0:
-            result["success"] = True
-            result["message"] = "Asterisk restarted successfully"
-            result["details"] = proc.stdout
-            logger.info("Asterisk restarted")
-        else:
-            result["message"] = "Failed to restart Asterisk"
-            result["details"] = proc.stderr
-            
-    except Exception as e:
-        result["message"] = f"Restart error: {str(e)}"
-        logger.error(f"Asterisk restart error: {e}")
-    
-    return result
+class BackupStatus(str, Enum):
+    """Статус резервного копирования"""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
-def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Проверка статуса регистрации в Asterisk"""
-    result = {
-        "registered": False,
-        "message": "",
-        "host": config["host"],
-        "port": config["port"],
-        "extension": config["extension"],
-        "details": ""
-    }
-    
-    try:
-        # Проверяем TCP подключение
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3)
-        connect_result = sock.connect_ex((config["host"], config["port"]))
-        sock.close()
-        
-        if connect_result != 0:
-            result["message"] = f"Порт {config['port']} недоступен"
-            return result
-        
-        # Пробуем получить статус регистрации через asterisk
-        cmd = ["asterisk", "-rx", "pjsip show registrations"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        
-        if proc.returncode == 0:
-            result["details"] = proc.stdout
-            
-            # Ищем нашу регистрацию
-            if config["extension"] in proc.stdout and "Registered" in proc.stdout:
-                result["registered"] = True
-                result["message"] = "Зарегистрирован"
-            elif config["extension"] in proc.stdout:
-                result["registered"] = False
-                result["message"] = "Не зарегистрирован (проверьте учетные данные)"
-            else:
-                result["registered"] = False
-                result["message"] = "Регистрация не найдена"
-        else:
-            result["message"] = "Не удалось получить статус регистрации"
-            
-    except Exception as e:
-        result["message"] = f"Ошибка проверки: {str(e)}"
-        logger.error(f"Registration check error: {e}")
-    
-    return result
+class NotificationType(str, Enum):
+    """Типы уведомлений"""
+    EMAIL = "email"
+    SMS = "sms"
+    TELEGRAM = "telegram"
+    WEBHOOK = "webhook"
+    SLACK = "slack"
+    DISCORD = "discord"
+
+
+class NotificationPriority(str, Enum):
+    """Приоритет уведомлений"""
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
+class RegistrationStatus(str, Enum):
+    """Статус регистрации"""
+    REGISTERED = "registered"
+    UNREGISTERED = "unregistered"
+    REGISTERING = "registering"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class ConnectionTestResult(str, Enum):
+    """Результат теста подключения"""
+    SUCCESS = "success"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+    REFUSED = "refused"
+    UNKNOWN = "unknown"
 
 
 # ============================================================================
-# PYDANTIC МОДЕЛИ
+# PBX SETTINGS
 # ============================================================================
+
+class PBXSettings(BaseModel):
+    """Настройки FreePBX / Asterisk"""
+    
+    # Основные настройки
+    host: str = Field("192.168.1.10", description="IP адрес или домен FreePBX")
+    port: int = Field(5060, ge=1, le=65535, description="Порт SIP")
+    extension: str = Field("gochs", min_length=1, max_length=20, description="Внутренний номер")
+    username: str = Field("gochs", min_length=1, max_length=50, description="Логин")
+    password: str = Field("", description="Пароль")
+    
+    # Транспорт и кодеки
+    transport: TransportType = Field(TransportType.UDP, description="Транспорт")
+    codecs: List[CodecType] = Field([CodecType.ULAW, CodecType.ALAW], description="Кодеки в порядке приоритета")
+    
+    # Лимиты
+    max_channels: int = Field(20, ge=1, le=500, description="Максимум одновременных каналов")
+    max_retries: int = Field(3, ge=1, le=10, description="Максимум повторных попыток")
+    retry_interval: int = Field(300, ge=30, le=3600, description="Интервал повторов (сек)")
+    
+    # Таймауты
+    call_timeout: int = Field(40, ge=10, le=300, description="Таймаут звонка (сек)")
+    register_timeout: int = Field(30, ge=10, le=120, description="Таймаут регистрации (сек)")
+    keepalive_interval: int = Field(30, ge=10, le=300, description="Интервал keepalive (сек)")
+    
+    # Безопасность
+    use_srtp: bool = Field(False, description="Использовать SRTP")
+    use_tls_verify: bool = Field(False, description="Проверять TLS сертификат")
+    allow_guest: bool = Field(False, description="Разрешить гостевые звонки")
+    
+    # Регистрация
+    register_enabled: bool = Field(True, description="Включить регистрацию")
+    register_on_startup: bool = Field(True, description="Регистрироваться при запуске")
+    
+    # Дополнительно
+    context: str = Field("gochs-inbound", description="Контекст для входящих")
+    caller_id: str = Field("ГО-ЧС", max_length=50, description="Caller ID")
+    nat_mode: str = Field("auto", description="Режим NAT (auto/force/disable)")
+    
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class PBXSettingsUpdate(BaseModel):
+    """Обновление настроек FreePBX"""
+    host: Optional[str] = Field(None, description="IP адрес или домен")
+    port: Optional[int] = Field(None, ge=1, le=65535)
+    extension: Optional[str] = Field(None, min_length=1, max_length=20)
+    username: Optional[str] = Field(None, min_length=1, max_length=50)
+    password: Optional[str] = Field(None)
+    transport: Optional[TransportType] = None
+    codecs: Optional[List[CodecType]] = None
+    max_channels: Optional[int] = Field(None, ge=1, le=500)
+    max_retries: Optional[int] = Field(None, ge=1, le=10)
+    retry_interval: Optional[int] = Field(None, ge=30, le=3600)
+    call_timeout: Optional[int] = Field(None, ge=10, le=300)
+    register_timeout: Optional[int] = Field(None, ge=10, le=120)
+    keepalive_interval: Optional[int] = Field(None, ge=10, le=300)
+    use_srtp: Optional[bool] = None
+    use_tls_verify: Optional[bool] = None
+    allow_guest: Optional[bool] = None
+    register_enabled: Optional[bool] = None
+    register_on_startup: Optional[bool] = None
+    context: Optional[str] = None
+    caller_id: Optional[str] = Field(None, max_length=50)
+    nat_mode: Optional[str] = None
+    
+    model_config = ConfigDict(use_enum_values=True)
+
 
 class PBXSettingsResponse(BaseModel):
+    """Ответ с настройками FreePBX"""
     host: str
     port: int
     extension: str
     username: str
-    password: str
+    password: str = Field("", description="Пароль (скрыт)")
     transport: str = "udp"
-    max_channels: int = 20
     codecs: List[str] = ["ulaw", "alaw"]
+    max_channels: int = 20
+    max_retries: int = 3
+    retry_interval: int = 300
+    call_timeout: int = 40
+    register_timeout: int = 30
+    keepalive_interval: int = 30
+    use_srtp: bool = False
+    use_tls_verify: bool = False
+    allow_guest: bool = False
     register_enabled: bool = True
+    register_on_startup: bool = True
+    context: str = "gochs-inbound"
+    caller_id: str = "ГО-ЧС"
+    nat_mode: str = "auto"
+    
+    model_config = ConfigDict(extra="ignore")
 
 
 class PBXStatusResponse(BaseModel):
-    registered: bool
-    message: str = ""
-    host: Optional[str] = None
-    port: Optional[int] = None
-    extension: Optional[str] = None
-    details: Optional[str] = None
+    """Статус регистрации в FreePBX"""
+    registered: bool = Field(False, description="Зарегистрирован ли")
+    status: RegistrationStatus = Field(RegistrationStatus.UNKNOWN, description="Статус")
+    message: str = Field("", description="Сообщение")
+    host: Optional[str] = Field(None, description="Хост")
+    port: Optional[int] = Field(None, description="Порт")
+    extension: Optional[str] = Field(None, description="Extension")
+    register_time: Optional[datetime] = Field(None, description="Время регистрации")
+    last_check: Optional[datetime] = Field(None, description="Последняя проверка")
+    details: Optional[str] = Field(None, description="Детали")
+    
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class PBXTestResponse(BaseModel):
-    success: bool
-    message: str = ""
-    error: Optional[str] = None
+    """Результат тестирования подключения"""
+    success: bool = Field(False, description="Успешно ли")
+    result: ConnectionTestResult = Field(ConnectionTestResult.UNKNOWN, description="Результат")
+    message: str = Field("", description="Сообщение")
+    error: Optional[str] = Field(None, description="Ошибка")
+    host: Optional[str] = Field(None, description="Проверенный хост")
+    port: Optional[int] = Field(None, description="Проверенный порт")
+    response_time_ms: Optional[int] = Field(None, description="Время ответа (мс)")
+    tested_at: Optional[datetime] = Field(None, description="Время теста")
+    
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class PBXReloadResponse(BaseModel):
-    message: str
-    success: bool = True
-    details: Optional[str] = None
+    """Ответ при перезагрузке PJSIP"""
+    message: str = Field("", description="Сообщение")
+    success: bool = Field(True, description="Успешно ли")
+    details: Optional[str] = Field(None, description="Детали")
+    reloaded_at: Optional[datetime] = Field(None, description="Время перезагрузки")
 
 
 class PBXRestartResponse(BaseModel):
-    message: str
-    success: bool = True
-    details: Optional[str] = None
+    """Ответ при перезапуске Asterisk"""
+    message: str = Field("", description="Сообщение")
+    success: bool = Field(True, description="Успешно ли")
+    details: Optional[str] = Field(None, description="Детали")
+    restarted_at: Optional[datetime] = Field(None, description="Время перезапуска")
 
 
 class PBXApplyResponse(BaseModel):
-    message: str
-    config_updated: bool
-    pjsip_reloaded: bool
-    registration_status: PBXStatusResponse
+    """Ответ при применении настроек"""
+    message: str = Field("", description="Сообщение")
+    config_updated: bool = Field(False, description="Конфиг обновлен")
+    pjsip_reloaded: bool = Field(False, description="PJSIP перезагружен")
+    asterisk_restarted: bool = Field(False, description="Asterisk перезапущен")
+    registration_status: Optional[PBXStatusResponse] = Field(None, description="Статус регистрации")
+    applied_at: Optional[datetime] = Field(None, description="Время применения")
+
+
+# ============================================================================
+# SYSTEM SETTINGS
+# ============================================================================
+
+class SystemSettings(BaseModel):
+    """Системные настройки"""
+    
+    # Основные
+    app_name: str = Field("ГО-ЧС Информирование", min_length=1, max_length=100, description="Название системы")
+    app_version: str = Field("1.0.0", description="Версия системы")
+    environment: str = Field("production", description="Окружение (development/staging/production)")
+    
+    # Время и локаль
+    timezone: Timezone = Field(Timezone.MOSCOW, description="Часовой пояс")
+    language: str = Field("ru", min_length=2, max_length=5, description="Язык")
+    date_format: str = Field("DD.MM.YYYY", description="Формат даты")
+    time_format: str = Field("HH:mm:ss", description="Формат времени")
+    
+    # Логирование
+    log_level: LogLevel = Field(LogLevel.INFO, description="Уровень логирования")
+    log_retention_days: int = Field(30, ge=1, le=365, description="Хранить логи (дней)")
+    log_to_file: bool = Field(True, description="Писать в файл")
+    log_to_console: bool = Field(True, description="Писать в консоль")
+    
+    # Лимиты
+    max_concurrent_calls: int = Field(20, ge=1, le=500, description="Максимум звонков")
+    max_recording_size_mb: int = Field(100, ge=10, le=1000, description="Макс. размер записи (МБ)")
+    max_upload_size_mb: int = Field(50, ge=1, le=500, description="Макс. размер загрузки (МБ)")
+    
+    # Записи
+    recording_retention_days: int = Field(90, ge=1, le=365, description="Хранить записи (дней)")
+    recording_format: str = Field("wav", description="Формат записи (wav/mp3)")
+    recording_compression: bool = Field(False, description="Сжимать записи")
+    
+    # Очистка
+    auto_cleanup_enabled: bool = Field(True, description="Авто-очистка")
+    cleanup_hour: int = Field(2, ge=0, le=23, description="Час очистки")
+    
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class SystemSettingsUpdate(BaseModel):
+    """Обновление системных настроек"""
+    app_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    environment: Optional[str] = None
+    timezone: Optional[Timezone] = None
+    language: Optional[str] = Field(None, min_length=2, max_length=5)
+    date_format: Optional[str] = None
+    time_format: Optional[str] = None
+    log_level: Optional[LogLevel] = None
+    log_retention_days: Optional[int] = Field(None, ge=1, le=365)
+    log_to_file: Optional[bool] = None
+    log_to_console: Optional[bool] = None
+    max_concurrent_calls: Optional[int] = Field(None, ge=1, le=500)
+    max_recording_size_mb: Optional[int] = Field(None, ge=10, le=1000)
+    max_upload_size_mb: Optional[int] = Field(None, ge=1, le=500)
+    recording_retention_days: Optional[int] = Field(None, ge=1, le=365)
+    recording_format: Optional[str] = None
+    recording_compression: Optional[bool] = None
+    auto_cleanup_enabled: Optional[bool] = None
+    cleanup_hour: Optional[int] = Field(None, ge=0, le=23)
+    
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class SystemSettingsResponse(BaseModel):
+    """Ответ с системными настройками"""
     app_name: str
+    app_version: str
+    environment: str
     timezone: str
+    language: str
+    date_format: str
+    time_format: str
     log_level: str
+    log_retention_days: int
+    log_to_file: bool
+    log_to_console: bool
     max_concurrent_calls: int
+    max_recording_size_mb: int
+    max_upload_size_mb: int
     recording_retention_days: int
-    backup_enabled: bool
-    backup_time: str
+    recording_format: str
+    recording_compression: bool
+    auto_cleanup_enabled: bool
+    cleanup_hour: int
+    
+    model_config = ConfigDict(extra="ignore")
+
+
+# ============================================================================
+# SECURITY SETTINGS
+# ============================================================================
+
+class SecuritySettings(BaseModel):
+    """Настройки безопасности"""
+    
+    # JWT
+    jwt_expire_minutes: int = Field(60, ge=5, le=1440, description="Срок JWT (минут)")
+    jwt_refresh_expire_days: int = Field(7, ge=1, le=30, description="Срок Refresh (дней)")
+    jwt_algorithm: str = Field("HS256", description="Алгоритм JWT")
+    
+    # Пароли
+    password_min_length: int = Field(8, ge=6, le=32, description="Мин. длина пароля")
+    password_require_uppercase: bool = Field(True, description="Требовать заглавные")
+    password_require_lowercase: bool = Field(True, description="Требовать строчные")
+    password_require_digits: bool = Field(True, description="Требовать цифры")
+    password_require_special: bool = Field(True, description="Требовать спецсимволы")
+    password_expire_days: int = Field(90, ge=0, le=365, description="Срок действия пароля (0=нет)")
+    
+    # Вход
+    max_login_attempts: int = Field(5, ge=3, le=10, description="Макс. попыток входа")
+    lockout_minutes: int = Field(15, ge=5, le=60, description="Блокировка (минут)")
+    session_timeout_minutes: int = Field(30, ge=5, le=480, description="Таймаут сессии")
+    
+    # 2FA
+    two_factor_enabled: bool = Field(False, description="Включить 2FA")
+    two_factor_method: str = Field("email", description="Метод 2FA (email/sms/totp)")
+    
+    # IP
+    ip_whitelist: List[str] = Field([], description="Белый список IP")
+    ip_blacklist: List[str] = Field([], description="Черный список IP")
+    allow_api_without_auth: bool = Field(False, description="API без авторизации")
+    
+    # CORS
+    cors_origins: List[str] = Field(["*"], description="Разрешенные origins")
+    
+    model_config = ConfigDict(extra="ignore")
+
+
+class SecuritySettingsUpdate(BaseModel):
+    """Обновление настроек безопасности"""
+    jwt_expire_minutes: Optional[int] = Field(None, ge=5, le=1440)
+    jwt_refresh_expire_days: Optional[int] = Field(None, ge=1, le=30)
+    jwt_algorithm: Optional[str] = None
+    password_min_length: Optional[int] = Field(None, ge=6, le=32)
+    password_require_uppercase: Optional[bool] = None
+    password_require_lowercase: Optional[bool] = None
+    password_require_digits: Optional[bool] = None
+    password_require_special: Optional[bool] = None
+    password_expire_days: Optional[int] = Field(None, ge=0, le=365)
+    max_login_attempts: Optional[int] = Field(None, ge=3, le=10)
+    lockout_minutes: Optional[int] = Field(None, ge=5, le=60)
+    session_timeout_minutes: Optional[int] = Field(None, ge=5, le=480)
+    two_factor_enabled: Optional[bool] = None
+    two_factor_method: Optional[str] = None
+    ip_whitelist: Optional[List[str]] = None
+    ip_blacklist: Optional[List[str]] = None
+    allow_api_without_auth: Optional[bool] = None
+    cors_origins: Optional[List[str]] = None
 
 
 class SecuritySettingsResponse(BaseModel):
+    """Ответ с настройками безопасности"""
     jwt_expire_minutes: int
-    refresh_token_expire_days: int
+    jwt_refresh_expire_days: int
+    jwt_algorithm: str
+    password_min_length: int
+    password_require_uppercase: bool
+    password_require_lowercase: bool
+    password_require_digits: bool
+    password_require_special: bool
+    password_expire_days: int
     max_login_attempts: int
     lockout_minutes: int
-    password_min_length: int
-    require_special_chars: bool
     session_timeout_minutes: int
+    two_factor_enabled: bool
+    two_factor_method: str
+    ip_whitelist: List[str]
+    ip_blacklist: List[str]
+    allow_api_without_auth: bool
+    cors_origins: List[str]
+    
+    model_config = ConfigDict(extra="ignore")
+
+
+# ============================================================================
+# NOTIFICATION SETTINGS
+# ============================================================================
+
+class NotificationSettings(BaseModel):
+    """Настройки уведомлений"""
+    
+    # Email
+    email_enabled: bool = Field(False, description="Включить Email")
+    email_smtp_server: str = Field("", description="SMTP сервер")
+    email_smtp_port: int = Field(587, ge=1, le=65535, description="SMTP порт")
+    email_smtp_username: str = Field("", description="SMTP пользователь")
+    email_smtp_password: str = Field("", description="SMTP пароль")
+    email_smtp_use_tls: bool = Field(True, description="Использовать TLS")
+    email_from: str = Field("", description="От кого")
+    email_from_name: str = Field("ГО-ЧС Информирование", description="Имя отправителя")
+    
+    # Telegram
+    telegram_enabled: bool = Field(False, description="Включить Telegram")
+    telegram_bot_token: str = Field("", description="Токен бота")
+    telegram_chat_ids: List[str] = Field([], description="ID чатов")
+    
+    # Webhook
+    webhook_enabled: bool = Field(False, description="Включить Webhook")
+    webhook_url: str = Field("", description="URL вебхука")
+    webhook_secret: str = Field("", description="Секретный ключ")
+    
+    # Триггеры
+    notify_on_campaign_start: bool = Field(True, description="При запуске кампании")
+    notify_on_campaign_complete: bool = Field(True, description="При завершении кампании")
+    notify_on_campaign_error: bool = Field(True, description="При ошибке кампании")
+    notify_on_system_error: bool = Field(True, description="При ошибке системы")
+    notify_on_system_startup: bool = Field(False, description="При запуске системы")
+    notify_on_backup_complete: bool = Field(False, description="При завершении бэкапа")
+    
+    # Приоритеты
+    min_priority: NotificationPriority = Field(NotificationPriority.NORMAL, description="Мин. приоритет")
+    
+    model_config = ConfigDict(use_enum_values=True, extra="ignore")
+
+
+class NotificationSettingsUpdate(BaseModel):
+    """Обновление настроек уведомлений"""
+    email_enabled: Optional[bool] = None
+    email_smtp_server: Optional[str] = None
+    email_smtp_port: Optional[int] = Field(None, ge=1, le=65535)
+    email_smtp_username: Optional[str] = None
+    email_smtp_password: Optional[str] = None
+    email_smtp_use_tls: Optional[bool] = None
+    email_from: Optional[str] = None
+    email_from_name: Optional[str] = None
+    telegram_enabled: Optional[bool] = None
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_ids: Optional[List[str]] = None
+    webhook_enabled: Optional[bool] = None
+    webhook_url: Optional[str] = None
+    webhook_secret: Optional[str] = None
+    notify_on_campaign_start: Optional[bool] = None
+    notify_on_campaign_complete: Optional[bool] = None
+    notify_on_campaign_error: Optional[bool] = None
+    notify_on_system_error: Optional[bool] = None
+    notify_on_system_startup: Optional[bool] = None
+    notify_on_backup_complete: Optional[bool] = None
+    min_priority: Optional[NotificationPriority] = None
+    
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class NotificationSettingsResponse(BaseModel):
+    """Ответ с настройками уведомлений"""
     email_enabled: bool
-    smtp_server: str
-    smtp_port: int
-    smtp_username: str
-    smtp_password: str
-    from_email: str
-    admin_email: str
+    email_smtp_server: str
+    email_smtp_port: int
+    email_smtp_username: str
+    email_smtp_password: str = Field("", description="Пароль (скрыт)")
+    email_smtp_use_tls: bool
+    email_from: str
+    email_from_name: str
+    telegram_enabled: bool
+    telegram_bot_token: str = Field("", description="Токен (скрыт)")
+    telegram_chat_ids: List[str]
+    webhook_enabled: bool
+    webhook_url: str
+    webhook_secret: str = Field("", description="Секрет (скрыт)")
+    notify_on_campaign_start: bool
     notify_on_campaign_complete: bool
+    notify_on_campaign_error: bool
     notify_on_system_error: bool
+    notify_on_system_startup: bool
+    notify_on_backup_complete: bool
+    min_priority: str
+    
+    model_config = ConfigDict(extra="ignore")
 
 
 # ============================================================================
-# ENDPOINTS
+# BACKUP SETTINGS
 # ============================================================================
 
-@router.get("/pbx", response_model=PBXSettingsResponse)
-async def get_pbx_settings():
-    """Получение настроек FreePBX"""
-    config = get_freepbx_config()
-    return {
-        "host": config["host"],
-        "port": config["port"],
-        "extension": config["extension"],
-        "username": config["username"],
-        "password": config["password"],
-        "transport": config["transport"],
-        "max_channels": config["max_channels"],
-        "codecs": config["codecs"],
-        "register_enabled": config["register_enabled"]
-    }
+class BackupSettings(BaseModel):
+    """Настройки резервного копирования"""
+    
+    enabled: bool = Field(True, description="Включить авто-бэкап")
+    type: BackupType = Field(BackupType.FULL, description="Тип бэкапа")
+    schedule: str = Field("0 2 * * *", description="Расписание (cron)")
+    retention_days: int = Field(30, ge=1, le=365, description="Хранить (дней)")
+    max_backups: int = Field(10, ge=1, le=100, description="Макс. количество бэкапов")
+    
+    # Пути
+    backup_dir: str = Field("/opt/gochs-informing/backups", description="Директория бэкапов")
+    
+    # Что бэкапить
+    include_database: bool = Field(True, description="База данных")
+    include_settings: bool = Field(True, description="Настройки")
+    include_recordings: bool = Field(False, description="Записи звонков")
+    include_logs: bool = Field(False, description="Логи")
+    
+    # Сжатие
+    compress: bool = Field(True, description="Сжимать")
+    compression_level: int = Field(6, ge=1, le=9, description="Уровень сжатия")
+    
+    # Удаленное хранилище
+    remote_enabled: bool = Field(False, description="Удаленное хранилище")
+    remote_type: str = Field("sftp", description="Тип (sftp/ftp/s3)")
+    remote_host: str = Field("", description="Хост")
+    remote_port: int = Field(22, ge=1, le=65535)
+    remote_path: str = Field("", description="Путь")
+    remote_username: str = Field("", description="Пользователь")
+    remote_password: str = Field("", description="Пароль")
+    
+    model_config = ConfigDict(use_enum_values=True)
 
 
-@router.put("/pbx", response_model=PBXSettingsResponse)
-async def update_pbx_settings(data: Dict[str, Any]):
-    """Обновление настроек FreePBX (только сохранение в файлы)"""
-    logger.info("Updating PBX settings")
+class BackupSettingsUpdate(BaseModel):
+    """Обновление настроек бэкапа"""
+    enabled: Optional[bool] = None
+    type: Optional[BackupType] = None
+    schedule: Optional[str] = None
+    retention_days: Optional[int] = Field(None, ge=1, le=365)
+    max_backups: Optional[int] = Field(None, ge=1, le=100)
+    backup_dir: Optional[str] = None
+    include_database: Optional[bool] = None
+    include_settings: Optional[bool] = None
+    include_recordings: Optional[bool] = None
+    include_logs: Optional[bool] = None
+    compress: Optional[bool] = None
+    compression_level: Optional[int] = Field(None, ge=1, le=9)
+    remote_enabled: Optional[bool] = None
+    remote_type: Optional[str] = None
+    remote_host: Optional[str] = None
+    remote_port: Optional[int] = Field(None, ge=1, le=65535)
+    remote_path: Optional[str] = None
+    remote_username: Optional[str] = None
+    remote_password: Optional[str] = None
     
-    if "host" in data:
-        host = data["host"]
-        port = data.get("port", 5060)
-        write_env_value("FREEPBX_HOST", f"{host}:{port}")
-    
-    if "port" in data:
-        write_env_value("FREEPBX_PORT", str(data["port"]))
-    
-    if "extension" in data:
-        write_env_value("FREEPBX_EXTENSION", data["extension"])
-        write_env_value("FREEPBX_USERNAME", data["extension"])
-    
-    if "password" in data and data["password"]:
-        write_env_value("FREEPBX_PASSWORD", data["password"])
-    
-    if "transport" in data:
-        write_env_value("FREEPBX_TRANSPORT", data["transport"])
-    
-    if "max_channels" in data:
-        write_env_value("MAX_CONCURRENT_CALLS", str(data["max_channels"]))
-    
-    if "register_enabled" in data:
-        write_env_value("FREEPBX_ENABLED", str(data["register_enabled"]).lower())
-    
-    if "codecs" in data:
-        write_env_value("FREEPBX_CODECS", ','.join(data["codecs"]))
-    
-    return await get_pbx_settings()
+    model_config = ConfigDict(use_enum_values=True)
 
 
-@router.post("/pbx/apply", response_model=PBXApplyResponse)
-async def apply_pbx_settings(background_tasks: BackgroundTasks):
-    """
-    Применение настроек FreePBX:
-    1. Обновление pjsip.conf
-    2. Перезагрузка PJSIP
-    3. Проверка статуса регистрации
-    """
-    config = get_freepbx_config()
+class BackupResponse(BaseModel):
+    """Ответ при создании бэкапа"""
+    message: str = Field("", description="Сообщение")
+    backup_id: str = Field("", description="ID бэкапа")
+    backup_file: str = Field("", description="Файл бэкапа")
+    backup_type: BackupType = Field(BackupType.FULL, description="Тип бэкапа")
+    size_bytes: int = Field(0, description="Размер в байтах")
+    timestamp: str = Field("", description="Временная метка")
+    status: BackupStatus = Field(BackupStatus.PENDING, description="Статус")
     
-    # Обновляем конфиг Asterisk
-    config_updated = update_asterisk_pjsip_config(config)
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class BackupListItem(BaseModel):
+    """Элемент списка бэкапов"""
+    id: str = Field(..., description="ID бэкапа")
+    name: str = Field(..., description="Имя файла")
+    size: int = Field(..., description="Размер в байтах")
+    type: BackupType = Field(..., description="Тип бэкапа")
+    status: BackupStatus = Field(..., description="Статус")
+    created: str = Field(..., description="Дата создания")
+    path: str = Field(..., description="Полный путь")
     
-    # Перезагружаем PJSIP
-    reload_result = reload_asterisk_pjsip()
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class BackupsListResponse(BaseModel):
+    """Список бэкапов"""
+    backups: List[BackupListItem] = Field([], description="Список бэкапов")
+    total: int = Field(0, description="Всего бэкапов")
+    total_size_bytes: int = Field(0, description="Общий размер")
     
-    # Проверяем статус регистрации (в фоне, т.к. может занять время)
-    def check_status():
-        status = check_registration_status(config)
-        logger.info(f"Registration status: {status['message']}")
+    model_config = ConfigDict(extra="ignore")
+
+
+# ============================================================================
+# ALL SETTINGS
+# ============================================================================
+
+class AllSettingsResponse(BaseModel):
+    """Все настройки системы"""
+    pbx: PBXSettingsResponse
+    system: SystemSettingsResponse
+    security: SecuritySettingsResponse
+    notifications: NotificationSettingsResponse
     
-    background_tasks.add_task(check_status)
+    model_config = ConfigDict(extra="ignore")
+
+
+# ============================================================================
+# CREDENTIALS
+# ============================================================================
+
+class CredentialsInfoResponse(BaseModel):
+    """Информация об учетных данных (без паролей)"""
+    freepbx: Dict[str, Any] = Field({}, description="FreePBX")
+    postgresql: Dict[str, Any] = Field({}, description="PostgreSQL")
+    redis: Dict[str, Any] = Field({}, description="Redis")
+    asterisk: Dict[str, Any] = Field({}, description="Asterisk")
     
-    # Быстрая проверка статуса
-    status = check_registration_status(config)
+    model_config = ConfigDict(extra="ignore")
+
+
+# ============================================================================
+# RESET
+# ============================================================================
+
+class ResetSettingsResponse(BaseModel):
+    """Ответ при сбросе настроек"""
+    message: str = Field("", description="Сообщение")
+    success: bool = Field(False, description="Успешно ли")
+    reset_sections: List[str] = Field([], description="Сброшенные секции")
+    reset_at: Optional[datetime] = Field(None, description="Время сброса")
+
+
+# ============================================================================
+# IMPORT/EXPORT
+# ============================================================================
+
+class ExportSettingsResponse(BaseModel):
+    """Ответ при экспорте настроек"""
+    filename: str = Field(..., description="Имя файла")
+    content: str = Field("", description="Содержимое (base64)")
+    timestamp: str = Field(..., description="Временная метка")
+    sections: List[str] = Field([], description="Экспортированные секции")
+
+
+class ImportSettingsResponse(BaseModel):
+    """Ответ при импорте настроек"""
+    message: str = Field("", description="Сообщение")
+    success: bool = Field(False, description="Успешно ли")
+    imported_sections: List[str] = Field([], description="Импортированные секции")
+    errors: List[str] = Field([], description="Ошибки")
+
+
+class ValidateSettingsResponse(BaseModel):
+    """Ответ при валидации настроек"""
+    valid: bool = Field(False, description="Валидны ли")
+    errors: List[Dict[str, Any]] = Field([], description="Ошибки валидации")
+    warnings: List[Dict[str, Any]] = Field([], description="Предупреждения")
+
+
+# ============================================================================
+# HEALTH
+# ============================================================================
+
+class SettingsHealthResponse(BaseModel):
+    """Проверка здоровья настроек"""
+    env_file_exists: bool = Field(False, description="Существует ли .env")
+    cred_file_exists: bool = Field(False, description="Существует ли credentials")
+    config_file_exists: bool = Field(False, description="Существует ли config.yaml")
+    settings_loaded: bool = Field(False, description="Настройки загружены")
+    status: str = Field("unknown", description="Статус")
+
+
+# ============================================================================
+# EXPORT ALL
+# ============================================================================
+
+__all__ = [
+    # Enums
+    "TransportType", "LogLevel", "Timezone", "CodecType", "AuthMethod",
+    "BackupType", "BackupStatus", "NotificationType", "NotificationPriority",
+    "RegistrationStatus", "ConnectionTestResult",
     
-    return {
-        "message": "Настройки применены" if config_updated and reload_result["success"] else "Применены с ошибками",
-        "config_updated": config_updated,
-        "pjsip_reloaded": reload_result["success"],
-        "registration_status": status
-    }
-
-
-@router.post("/pbx/apply-and-restart", response_model=PBXRestartResponse)
-async def apply_and_restart_pbx(background_tasks: BackgroundTasks):
-    """
-    Полное применение настроек с перезапуском Asterisk
-    """
-    config = get_freepbx_config()
+    # PBX
+    "PBXSettings", "PBXSettingsUpdate", "PBXSettingsResponse",
+    "PBXStatusResponse", "PBXTestResponse", "PBXReloadResponse",
+    "PBXRestartResponse", "PBXApplyResponse",
     
-    # Обновляем конфиг
-    config_updated = update_asterisk_pjsip_config(config)
+    # System
+    "SystemSettings", "SystemSettingsUpdate", "SystemSettingsResponse",
     
-    # Полный перезапуск Asterisk
-    restart_result = restart_asterisk_service()
+    # Security
+    "SecuritySettings", "SecuritySettingsUpdate", "SecuritySettingsResponse",
     
-    return {
-        "message": "Asterisk перезапущен" if restart_result["success"] else "Ошибка перезапуска",
-        "success": restart_result["success"],
-        "details": restart_result["details"]
-    }
-
-
-@router.get("/pbx/status", response_model=PBXStatusResponse)
-async def check_pbx_status():
-    """Проверка статуса регистрации в FreePBX"""
-    config = get_freepbx_config()
-    return check_registration_status(config)
-
-
-@router.post("/pbx/test", response_model=PBXTestResponse)
-async def test_pbx_connection(data: Dict[str, Any]):
-    """Тестирование подключения к FreePBX"""
-    host = data.get("host", "")
-    port = data.get("port", 5060)
+    # Notifications
+    "NotificationSettings", "NotificationSettingsUpdate", "NotificationSettingsResponse",
     
-    if not host:
-        return {"success": False, "message": "Не указан хост", "error": "Host is required"}
+    # Backup
+    "BackupSettings", "BackupSettingsUpdate", "BackupResponse",
+    "BackupListItem", "BackupsListResponse",
     
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        
-        if result == 0:
-            return {"success": True, "message": f"Подключение к {host}:{port} успешно", "error": None}
-        else:
-            return {"success": False, "message": f"Не удалось подключиться к {host}:{port}", "error": "Connection refused"}
-    except Exception as e:
-        return {"success": False, "message": "Ошибка подключения", "error": str(e)}
-
-
-@router.post("/pbx/reload", response_model=PBXReloadResponse)
-async def reload_pbx_config():
-    """Принудительная перезагрузка PJSIP"""
-    result = reload_asterisk_pjsip()
-    return {
-        "message": result["message"],
-        "success": result["success"],
-        "details": result["details"]
-    }
-
-
-@router.post("/pbx/restart", response_model=PBXRestartResponse)
-async def restart_pbx_service():
-    """Полный перезапуск Asterisk"""
-    result = restart_asterisk_service()
-    return {
-        "message": result["message"],
-        "success": result["success"],
-        "details": result["details"]
-    }
-
-
-@router.get("/system", response_model=SystemSettingsResponse)
-async def get_system_settings():
-    """Получение системных настроек"""
-    return {
-        "app_name": read_env_value("APP_NAME", "ГО-ЧС Информирование"),
-        "timezone": read_env_value("TIMEZONE", "Europe/Moscow"),
-        "log_level": read_env_value("LOG_LEVEL", "INFO"),
-        "max_concurrent_calls": int(read_env_value("MAX_CONCURRENT_CALLS", "20")),
-        "recording_retention_days": int(read_env_value("RECORDING_RETENTION_DAYS", "90")),
-        "backup_enabled": read_env_value("BACKUP_ENABLED", "true").lower() == "true",
-        "backup_time": read_env_value("BACKUP_TIME", "02:00")
-    }
-
-
-@router.put("/system", response_model=SystemSettingsResponse)
-async def update_system_settings(data: Dict[str, Any]):
-    """Обновление системных настроек"""
-    logger.info("Updating system settings")
+    # All
+    "AllSettingsResponse",
     
-    mapping = {
-        "app_name": "APP_NAME",
-        "timezone": "TIMEZONE",
-        "log_level": "LOG_LEVEL",
-        "max_concurrent_calls": "MAX_CONCURRENT_CALLS",
-        "recording_retention_days": "RECORDING_RETENTION_DAYS",
-        "backup_enabled": "BACKUP_ENABLED",
-        "backup_time": "BACKUP_TIME"
-    }
+    # Credentials
+    "CredentialsInfoResponse",
     
-    for key, env_key in mapping.items():
-        if key in data and data[key] is not None:
-            value = data[key]
-            if isinstance(value, bool):
-                value = str(value).lower()
-            write_env_value(env_key, str(value))
+    # Reset
+    "ResetSettingsResponse",
     
-    return await get_system_settings()
-
-
-@router.get("/security", response_model=SecuritySettingsResponse)
-async def get_security_settings():
-    """Получение настроек безопасности"""
-    return {
-        "jwt_expire_minutes": int(read_env_value("JWT_EXPIRE_MINUTES", "60")),
-        "refresh_token_expire_days": int(read_env_value("REFRESH_TOKEN_EXPIRE_DAYS", "7")),
-        "max_login_attempts": int(read_env_value("MAX_LOGIN_ATTEMPTS", "5")),
-        "lockout_minutes": int(read_env_value("LOCKOUT_MINUTES", "15")),
-        "password_min_length": int(read_env_value("PASSWORD_MIN_LENGTH", "8")),
-        "require_special_chars": read_env_value("REQUIRE_SPECIAL_CHARS", "true").lower() == "true",
-        "session_timeout_minutes": int(read_env_value("SESSION_TIMEOUT_MINUTES", "30"))
-    }
-
-
-@router.put("/security", response_model=SecuritySettingsResponse)
-async def update_security_settings(data: Dict[str, Any]):
-    """Обновление настроек безопасности"""
-    logger.info("Updating security settings")
+    # Import/Export
+    "ExportSettingsResponse", "ImportSettingsResponse", "ValidateSettingsResponse",
     
-    mapping = {
-        "jwt_expire_minutes": "JWT_EXPIRE_MINUTES",
-        "refresh_token_expire_days": "REFRESH_TOKEN_EXPIRE_DAYS",
-        "max_login_attempts": "MAX_LOGIN_ATTEMPTS",
-        "lockout_minutes": "LOCKOUT_MINUTES",
-        "password_min_length": "PASSWORD_MIN_LENGTH",
-        "require_special_chars": "REQUIRE_SPECIAL_CHARS",
-        "session_timeout_minutes": "SESSION_TIMEOUT_MINUTES"
-    }
-    
-    for key, env_key in mapping.items():
-        if key in data and data[key] is not None:
-            value = data[key]
-            if isinstance(value, bool):
-                value = str(value).lower()
-            write_env_value(env_key, str(value))
-    
-    return await get_security_settings()
-
-
-@router.get("/notifications", response_model=NotificationSettingsResponse)
-async def get_notification_settings():
-    """Получение настроек уведомлений"""
-    return {
-        "email_enabled": read_env_value("EMAIL_ENABLED", "false").lower() == "true",
-        "smtp_server": read_env_value("SMTP_SERVER", ""),
-        "smtp_port": int(read_env_value("SMTP_PORT", "587")),
-        "smtp_username": read_env_value("SMTP_USERNAME", ""),
-        "smtp_password": read_env_value("SMTP_PASSWORD", ""),
-        "from_email": read_env_value("FROM_EMAIL", ""),
-        "admin_email": read_env_value("ADMIN_EMAIL", ""),
-        "notify_on_campaign_complete": read_env_value("NOTIFY_CAMPAIGN_COMPLETE", "true").lower() == "true",
-        "notify_on_system_error": read_env_value("NOTIFY_SYSTEM_ERROR", "true").lower() == "true"
-    }
-
-
-@router.put("/notifications", response_model=NotificationSettingsResponse)
-async def update_notification_settings(data: Dict[str, Any]):
-    """Обновление настроек уведомлений"""
-    logger.info("Updating notification settings")
-    
-    mapping = {
-        "email_enabled": "EMAIL_ENABLED",
-        "smtp_server": "SMTP_SERVER",
-        "smtp_port": "SMTP_PORT",
-        "smtp_username": "SMTP_USERNAME",
-        "smtp_password": "SMTP_PASSWORD",
-        "from_email": "FROM_EMAIL",
-        "admin_email": "ADMIN_EMAIL",
-        "notify_on_campaign_complete": "NOTIFY_CAMPAIGN_COMPLETE",
-        "notify_on_system_error": "NOTIFY_SYSTEM_ERROR"
-    }
-    
-    for key, env_key in mapping.items():
-        if key in data and data[key] is not None:
-            value = data[key]
-            if isinstance(value, bool):
-                value = str(value).lower()
-            elif key == "smtp_password" and not value:
-                continue
-            write_env_value(env_key, str(value))
-    
-    return await get_notification_settings()
+    # Health
+    "SettingsHealthResponse"
+]
