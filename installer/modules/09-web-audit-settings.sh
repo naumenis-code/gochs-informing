@@ -3,7 +3,7 @@
 ################################################################################
 # Модуль: 09-web-audit-settings.sh
 # Назначение: Установка страниц Аудита и Настроек, копирование файлов в проект
-# Версия: 1.0.0
+# Версия: 1.0.2 (полная)
 ################################################################################
 
 # Определение путей
@@ -46,6 +46,17 @@ if ! type log_info &>/dev/null; then
             log_info "Создана резервная копия: $file"
         fi
     }
+    wait_for_service() {
+        local service="$1"
+        local max_wait="${2:-30}"
+        local count=0
+        while ! systemctl is-active --quiet "$service" 2>/dev/null; do
+            sleep 1
+            ((count++))
+            [[ $count -ge $max_wait ]] && return 1
+        done
+        return 0
+    }
 fi
 
 MODULE_NAME="09-web-audit-settings"
@@ -64,7 +75,8 @@ fi
 
 # Fallback: парсинг из credentials
 if [[ -z "$POSTGRES_PASSWORD" ]] && [[ -f "/root/.gochs_credentials" ]]; then
-    POSTGRES_PASSWORD=$(grep -oP 'Пароль: \K.*' /root/.gochs_credentials | head -1)
+    POSTGRES_PASSWORD=$(grep -A 2 "БАЗА ДАННЫХ POSTGRESQL:" /root/.gochs_credentials | grep -oP 'Пароль: \K.*')
+    REDIS_PASSWORD=$(grep -A 2 "REDIS:" /root/.gochs_credentials | grep -oP 'Пароль: \K.*')
 fi
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
@@ -107,7 +119,7 @@ install() {
     # Обновление импортов в frontend
     update_frontend_imports
     
-    # Пересборка фронтенда (опционально)
+    # Пересборка фронтенда
     rebuild_frontend
     
     # Перезапуск сервисов
@@ -142,15 +154,14 @@ check_source_files() {
     [[ ! -f "$INSTALLER_APP_SRC/models/audit_log.py" ]] && missing_files+=("app/models/audit_log.py")
     
     if [[ ${#missing_files[@]} -gt 0 ]]; then
-        log_error "Отсутствуют следующие файлы в installer:"
+        log_warn "Отсутствуют следующие файлы в installer:"
         for file in "${missing_files[@]}"; do
-            log_error "  - $file"
+            log_warn "  - $file"
         done
-        log_error "Убедитесь, что все файлы созданы в папке installer/"
-        return 1
+        log_info "Будут использованы существующие файлы в системе"
+    else
+        log_info "✓ Все необходимые файлы найдены"
     fi
-    
-    log_info "✓ Все необходимые файлы найдены"
 }
 
 copy_frontend_files() {
@@ -172,9 +183,13 @@ copy_frontend_files() {
         local src="$INSTALLER_FRONTEND_SRC/$file"
         local dst="$TARGET_FRONTEND/$file"
         
-        backup_file "$dst"
-        cp "$src" "$dst"
-        log_info "  ✓ $file"
+        if [[ -f "$src" ]]; then
+            backup_file "$dst"
+            cp "$src" "$dst"
+            log_info "  ✓ $file"
+        else
+            log_warn "  ✗ $file не найден в installer, пропускаем"
+        fi
     done
     
     # Установка прав
@@ -205,9 +220,13 @@ copy_backend_files() {
         local src="$INSTALLER_APP_SRC/$file"
         local dst="$TARGET_APP/$file"
         
-        backup_file "$dst"
-        cp "$src" "$dst"
-        log_info "  ✓ $file"
+        if [[ -f "$src" ]]; then
+            backup_file "$dst"
+            cp "$src" "$dst"
+            log_info "  ✓ $file"
+        else
+            log_warn "  ✗ $file не найден в installer, пропускаем"
+        fi
     done
     
     # Создание файлов __init__.py если их нет
@@ -228,7 +247,7 @@ update_api_routers() {
     
     if [[ ! -f "$api_init" ]]; then
         log_warn "Файл $api_init не найден, создаем новый..."
-        cat > "$api_init" << 'EOF'
+        cat > "$api_init" << 'ROUTER_EOF'
 #!/usr/bin/env python3
 """API v1 роутер"""
 
@@ -248,24 +267,21 @@ api_router.include_router(playbooks.router, prefix="/playbooks", tags=["playbook
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring"])
 api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
-EOF
+ROUTER_EOF
     else
         backup_file "$api_init"
         
         # Проверяем, есть ли уже импорт settings и audit
         if ! grep -q "from app.api.v1.endpoints import.*settings" "$api_init"; then
-            # Добавляем settings в импорт
-            sed -i 's/from app.api.v1.endpoints import.*/&, settings/' "$api_init"
+            sed -i 's/from app.api.v1.endpoints import \([^)]*\)/from app.api.v1.endpoints import \1, settings/' "$api_init"
         fi
         
         if ! grep -q "from app.api.v1.endpoints import.*audit" "$api_init"; then
-            # Добавляем audit в импорт
-            sed -i 's/from app.api.v1.endpoints import.*/&, audit/' "$api_init"
+            sed -i 's/from app.api.v1.endpoints import \([^)]*\)/from app.api.v1.endpoints import \1, audit/' "$api_init"
         fi
         
         # Проверяем, есть ли уже include_router для settings
         if ! grep -q 'include_router(settings.router' "$api_init"; then
-            # Добавляем после monitoring или в конец
             if grep -q 'include_router(monitoring.router' "$api_init"; then
                 sed -i '/include_router(monitoring.router/a\api_router.include_router(settings.router, prefix="/settings", tags=["settings"])' "$api_init"
             else
@@ -276,6 +292,15 @@ EOF
         # Проверяем, есть ли уже include_router для audit
         if ! grep -q 'include_router(audit.router' "$api_init"; then
             echo 'api_router.include_router(audit.router, prefix="/audit", tags=["audit"])' >> "$api_init"
+        fi
+    fi
+    
+    # Обновляем models/__init__.py
+    local models_init="$TARGET_APP/models/__init__.py"
+    if [[ -f "$models_init" ]]; then
+        if ! grep -q "AuditLog" "$models_init"; then
+            echo "from app.models.audit_log import AuditLog" >> "$models_init"
+            echo "__all__ = [\"User\", \"Contact\", \"Campaign\", \"AuditLog\"]" >> "$models_init"
         fi
     fi
     
@@ -676,3 +701,4 @@ case "${1:-}" in
         exit 1
         ;;
 esac
+EOF
