@@ -593,8 +593,10 @@ type = aor
 max_contacts = 1
 remove_existing = yes
 
-; Регистрация на FreePBX
-[freepbx]
+; =====================================================
+; РЕГИСТРАЦИЯ НА FREE PBX
+; =====================================================
+[freepbx-registration]
 type = registration
 outbound_auth = freepbx-auth
 server_uri = sip:$FREEPBX_HOST:$FREEPBX_PORT
@@ -610,13 +612,15 @@ auth_type = userpass
 username = $FREEPBX_USERNAME
 password = $FREEPBX_PASSWORD
 
-; Эндпоинт для FreePBX
-[freepbx-endpoint]
+; =====================================================
+; ЭНДПОИНТ ДЛЯ ИСХОДЯЩИХ ЗВОНКОВ
+; =====================================================
+[freepbx-outbound]
 type = endpoint
-aors = freepbx-aor
+aors = freepbx-outbound-aor
 outbound_auth = freepbx-auth
 context = gochs-outbound
-callerid = "ГО-ЧС Информирование" <$FREEPBX_EXTENSION>
+callerid = "ГО-ЧС" <$FREEPBX_EXTENSION>
 disallow = all
 allow = ulaw
 allow = alaw
@@ -628,10 +632,37 @@ force_rport = yes
 rewrite_contact = yes
 direct_media = no
 
-[freepbx-aor]
+[freepbx-outbound-aor]
 type = aor
 contact = sip:$FREEPBX_HOST:$FREEPBX_PORT
 qualify_frequency = 60
+
+; =====================================================
+; ПРИЁМ ВХОДЯЩИХ ОТ FREE PBX (по IP, без аутентификации)
+; =====================================================
+[freepbx-inbound]
+type = endpoint
+context = gochs-inbound
+disallow = all
+allow = ulaw
+allow = alaw
+allow = g729
+allow = opus
+dtmf_mode = rfc4733
+rtp_symmetric = yes
+force_rport = yes
+rewrite_contact = yes
+direct_media = no
+allow_unauthenticated_options = yes
+
+[freepbx-inbound-identify]
+type = identify
+endpoint = freepbx-inbound
+match = $FREEPBX_HOST
+
+[freepbx-inbound-aor]
+type = aor
+contact = sip:$FREEPBX_HOST:$FREEPBX_PORT
 EOF
 
     # extensions.conf
@@ -659,14 +690,14 @@ exten => _X.,1,NoOp(Входящий звонок от ${CALLERID(num)})
 ; Исходящие вызовы через FreePBX
 exten => _X.,1,NoOp(Исходящий вызов на ${EXTEN})
  same => n,Set(CHANNEL(language)=ru)
- same => n,Dial(PJSIP/${EXTEN}@freepbx-endpoint,60)
+ same => n,Dial(PJSIP/${EXTEN}@freepbx-outbound,60)
  same => n,Hangup()
 
 [gochs-dialer]
 ; Контекст для массового обзвона
 exten => s,1,NoOp(Массовый обзвон)
  same => n,Set(CALLERID(all)=ГО-ЧС <1000>)
- same => n,Dial(PJSIP/${DEST}@freepbx-endpoint,40,g)
+ same => n,Dial(PJSIP/${DEST}@freepbx-outbound,40,g)
  same => n,Hangup()
 
 [gochs-answer]
@@ -913,7 +944,7 @@ if [ -z "$1" ]; then
     exit 1
 fi
 echo "Тестовый звонок на номер $1"
-asterisk -rx "channel originate PJSIP/$1@freepbx-endpoint application Playback hello-world" 2>/dev/null
+asterisk -rx "channel originate PJSIP/$1@freepbx-outbound application Playback hello-world" 2>/dev/null
 EOF
 
     # Скрипт для мониторинга
@@ -1126,7 +1157,7 @@ case "${1:-}" in
         ;;
     test)
         if [[ -n "${2:-}" ]]; then
-            asterisk -rx "channel originate PJSIP/$2@freepbx-endpoint application Playback hello-world" 2>/dev/null
+            asterisk -rx "channel originate PJSIP/$2@freepbx-outbound application Playback hello-world" 2>/dev/null
             echo "Тестовый звонок на $2"
         else
             echo "Использование: $0 test <номер>"
