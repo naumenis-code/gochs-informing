@@ -496,16 +496,14 @@ INSERT INTO settings (key, value, category, description) VALUES
 ('system.version', '1.0.0', 'general', 'Версия системы')
 ON CONFLICT (key) DO NOTHING;
 
+-- Включаем pgcrypto для хеширования паролей
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Администратор по умолчанию (пароль: Admin123!)
-INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser)
-VALUES (
-    'admin@gochs.local',
-    'admin',
-    'Администратор системы',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYjKMdCpTpRi',
-    'admin',
-    true
-) ON CONFLICT (email) DO NOTHING;
+INSERT INTO users (email, username, full_name, hashed_password, role, is_superuser, is_active)
+SELECT 'admin@gochs.local', 'admin', 'Администратор системы', 
+       crypt('Admin123!', gen_salt('bf')), 'admin', TRUE, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
 
 EOF
 
@@ -513,6 +511,16 @@ EOF
     sudo -u postgres psql -d "$POSTGRES_DB" -f /tmp/init_gochs_db.sql 2>/dev/null || true
     
     rm -f /tmp/init_gochs_db.sql
+    
+    # Дополнительные права для пользователя
+    log_info "Настройка прав PostgreSQL..."
+    PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" << EOF 2>/dev/null
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $POSTGRES_USER;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $POSTGRES_USER;
+ALTER SCHEMA public OWNER TO $POSTGRES_USER;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO $POSTGRES_USER;
+EOF
+    log_info "✓ Права PostgreSQL настроены"
     
     log_info "Структура базы данных создана"
 }
