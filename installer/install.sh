@@ -553,6 +553,7 @@ full_install() {
         "04-redis"
         "05-asterisk"
         "06-backend"
+        "06a-coqui-tts"  # <-- ДОБАВЛЕНО: Генерация голоса
         "07-frontend"
         "08-nginx"
         "99-postfix"
