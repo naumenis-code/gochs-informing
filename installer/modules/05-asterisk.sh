@@ -538,6 +538,7 @@ EOF
 [global]
 debug = no
 endpoint_identifier_order = ip,username,anonymous
+user_agent = Yealink SIP-T31G 124.86.0.20
 
 [transport-udp]
 type = transport
@@ -553,48 +554,8 @@ bind = 0.0.0.0:5060
 external_media_address = $DOMAIN_OR_IP
 external_signaling_address = $DOMAIN_OR_IP
 
-; Шаблон для исходящих вызовов
-[gochs-outbound](!)
-type = endpoint
-context = gochs-outbound
-disallow = all
-allow = ulaw
-allow = alaw
-allow = g729
-allow = opus
-dtmf_mode = rfc4733
-rtp_symmetric = yes
-force_rport = yes
-rewrite_contact = yes
-direct_media = no
-send_pai = yes
-send_rpid = yes
-trust_id_outbound = yes
-device_state_busy_at = 1
-
-; Шаблон для входящих вызовов
-[gochs-inbound](!)
-type = endpoint
-context = gochs-inbound
-disallow = all
-allow = ulaw
-allow = alaw
-allow = g729
-allow = opus
-dtmf_mode = rfc4733
-rtp_symmetric = yes
-force_rport = yes
-rewrite_contact = yes
-direct_media = no
-
-; Шаблон AOR
-[gochs-aor](!)
-type = aor
-max_contacts = 1
-remove_existing = yes
-
 ; =====================================================
-; РЕГИСТРАЦИЯ НА FREE PBX
+; РЕГИСТРАЦИЯ НА FREE PBX (как телефон)
 ; =====================================================
 [freepbx-registration]
 type = registration
@@ -603,46 +564,23 @@ server_uri = sip:$FREEPBX_HOST:$FREEPBX_PORT
 client_uri = sip:$FREEPBX_EXTENSION@$FREEPBX_HOST:$FREEPBX_PORT
 contact_user = $FREEPBX_EXTENSION
 retry_interval = 30
-max_retries = 10
-forbidden_retry_interval = 300
+expiration = 3600
 
 [freepbx-auth]
 type = auth
 auth_type = userpass
 username = $FREEPBX_USERNAME
 password = $FREEPBX_PASSWORD
+realm = asterisk
 
 ; =====================================================
-; ЭНДПОИНТ ДЛЯ ИСХОДЯЩИХ ЗВОНКОВ
+; ЭНДПОИНТ - ВЕДЁТ СЕБЯ КАК ТЕЛЕФОН
 ; =====================================================
-[freepbx-outbound]
-type = endpoint
-aors = freepbx-outbound-aor
-outbound_auth = freepbx-auth
-context = gochs-outbound
-callerid = "ГО-ЧС" <$FREEPBX_EXTENSION>
-disallow = all
-allow = ulaw
-allow = alaw
-allow = g729
-allow = opus
-dtmf_mode = rfc4733
-rtp_symmetric = yes
-force_rport = yes
-rewrite_contact = yes
-direct_media = no
-
-[freepbx-outbound-aor]
-type = aor
-contact = sip:$FREEPBX_HOST:$FREEPBX_PORT
-qualify_frequency = 60
-
-; =====================================================
-; ПРИЁМ ВХОДЯЩИХ ОТ FREE PBX (по IP, без аутентификации)
-; =====================================================
-[freepbx-inbound]
+[freepbx]
 type = endpoint
 context = gochs-inbound
+aors = freepbx-aor
+outbound_auth = freepbx-auth
 disallow = all
 allow = ulaw
 allow = alaw
@@ -654,15 +592,23 @@ force_rport = yes
 rewrite_contact = yes
 direct_media = no
 allow_unauthenticated_options = yes
+callerid = "GOCHS" <$FREEPBX_EXTENSION>
+from_user = $FREEPBX_EXTENSION
+from_domain = $FREEPBX_HOST
+timers = yes
+timers_min_se = 90
+timers_sess_expires = 1800
 
-[freepbx-inbound-identify]
-type = identify
-endpoint = freepbx-inbound
-match = $FREEPBX_HOST
-
-[freepbx-inbound-aor]
+[freepbx-aor]
 type = aor
 contact = sip:$FREEPBX_HOST:$FREEPBX_PORT
+max_contacts = 1
+remove_existing = yes
+
+[freepbx-identify]
+type = identify
+endpoint = freepbx
+match = $FREEPBX_HOST
 EOF
 
     # extensions.conf
@@ -675,9 +621,7 @@ GOCHS_VOICE_DIR = /opt/gochs-informing/generated_voice
 [default]
 
 [gochs-inbound]
-; Обработка входящих звонков от FreePBX
 exten => _X.,1,NoOp(Входящий звонок от ${CALLERID(num)})
- same => n,Set(CHANNEL(language)=ru)
  same => n,Answer()
  same => n,Wait(1)
  same => n,Playback(${GOCHS_PLAYBOOK_DIR}/welcome)
@@ -687,24 +631,16 @@ exten => _X.,1,NoOp(Входящий звонок от ${CALLERID(num)})
  same => n,Hangup()
 
 [gochs-outbound]
-; Исходящие вызовы через FreePBX
-exten => _X.,1,NoOp(Исходящий вызов на ${EXTEN})
- same => n,Set(CHANNEL(language)=ru)
- same => n,Dial(PJSIP/${EXTEN}@freepbx-outbound,60)
+exten => _X.,1,NoOp(Исходящий звонок на ${EXTEN})
+ same => n,Set(CALLERID(all)=GOCHS <$FREEPBX_EXTENSION>)
+ same => n,Dial(PJSIP/${EXTEN}@freepbx,30)
  same => n,Hangup()
 
 [gochs-dialer]
-; Контекст для массового обзвона
-exten => s,1,NoOp(Массовый обзвон)
- same => n,Set(CALLERID(all)=ГО-ЧС <1000>)
- same => n,Dial(PJSIP/${DEST}@freepbx-outbound,40,g)
- same => n,Hangup()
-
-[gochs-answer]
-exten => s,1,NoOp(Воспроизведение сценария)
+exten => s,1,NoOp(Массовый обзвон - сценарий ${SCENARIO_ID})
+ same => n,Answer()
  same => n,Wait(1)
  same => n,Playback(${GOCHS_VOICE_DIR}/scenario_${SCENARIO_ID})
- same => n,Wait(2)
  same => n,Hangup()
 EOF
 
