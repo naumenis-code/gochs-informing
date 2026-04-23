@@ -3,7 +3,7 @@
 ################################################################################
 # Модуль: 09-web-audit-settings.sh
 # Назначение: Установка страниц Аудита и Настроек с полной интеграцией
-# Версия: 2.0.1 (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ - ГАРАНТИРОВАННОЕ ПОДКЛЮЧЕНИЕ АУДИТА)
+# Версия: 2.0.2 (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ - ГАРАНТИРОВАННОЕ ПОДКЛЮЧЕНИЕ АУДИТА)
 ################################################################################
 
 # Определение путей
@@ -94,40 +94,47 @@ INSTALLER_APP_SRC="$INSTALLER_DIR/app"
 TARGET_FRONTEND="$INSTALL_DIR/frontend/src"
 TARGET_APP="$INSTALL_DIR/app"
 
+# ============================================================================
+# УСТАНОВКА
+# ============================================================================
+
 install() {
     log_step "Установка страниц Аудита и Настроек"
     
-    # Проверка наличия исходных файлов
+    # 1. Проверка наличия исходных файлов
     check_source_files
     
-    # Копирование файлов фронтенда
-    copy_frontend_files
-    
-    # Копирование файлов бэкенда
+    # 2. Копирование файлов бэкенда
     copy_backend_files
     
-    # Обновление роутеров для подключения новых эндпоинтов (ПОЛНОСТЬЮ ПЕРЕСОЗДАЕТ)
+    # 3. Копирование файлов фронтенда
+    copy_frontend_files
+    
+    # 4. Копирование утилит
+    copy_utils_files
+    
+    # 5. Обновление роутеров (ПОЛНОСТЬЮ ПЕРЕСОЗДАЕТ __init__.py)
     update_api_routers
     
-    # Создание таблицы аудита в базе данных
+    # 6. Создание таблицы аудита в базе данных
     create_audit_table
     
-    # Проверка и исправление прав в базе данных
+    # 7. Проверка и исправление прав в базе данных
     fix_database_permissions
     
-    # Исправление импортов иконок в Settings.tsx
+    # 8. Исправление импортов иконок в Settings.tsx
     fix_settings_imports
     
-    # Обновление импортов в frontend
+    # 9. Обновление импортов в frontend
     update_frontend_imports
     
-    # Пересборка фронтенда
+    # 10. Пересборка фронтенда
     rebuild_frontend
     
-    # Перезапуск сервисов
+    # 11. Перезапуск сервисов
     restart_services
     
-    # Проверка, что аудит действительно подключен
+    # 12. Проверка, что аудит действительно подключен
     verify_audit_connected
     
     mark_module_installed "$MODULE_NAME"
@@ -139,6 +146,10 @@ install() {
     
     return 0
 }
+
+# ============================================================================
+# ПРОВЕРКА ИСХОДНЫХ ФАЙЛОВ
+# ============================================================================
 
 check_source_files() {
     log_info "Проверка наличия исходных файлов в installer..."
@@ -169,40 +180,9 @@ check_source_files() {
     fi
 }
 
-copy_frontend_files() {
-    log_info "Копирование файлов фронтенда..."
-    
-    # Создание целевых директорий
-    ensure_dir "$TARGET_FRONTEND/pages"
-    ensure_dir "$TARGET_FRONTEND/services"
-    
-    # Копирование с бэкапом существующих файлов
-    local files=(
-        "pages/Settings.tsx"
-        "pages/Audit.tsx"
-        "services/settingsService.ts"
-        "services/auditService.ts"
-    )
-    
-    for file in "${files[@]}"; do
-        local src="$INSTALLER_FRONTEND_SRC/$file"
-        local dst="$TARGET_FRONTEND/$file"
-        
-        if [[ -f "$src" ]]; then
-            backup_file "$dst"
-            cp "$src" "$dst"
-            log_info "  ✓ $file"
-        else
-            log_warn "  ✗ $file не найден в installer, пропускаем"
-        fi
-    done
-    
-    # Установка прав
-    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$TARGET_FRONTEND/pages" 2>/dev/null || true
-    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$TARGET_FRONTEND/services" 2>/dev/null || true
-    
-    log_info "Файлы фронтенда скопированы"
-}
+# ============================================================================
+# КОПИРОВАНИЕ ФАЙЛОВ БЭКЕНДА
+# ============================================================================
 
 copy_backend_files() {
     log_info "Копирование файлов бэкенда..."
@@ -244,6 +224,65 @@ copy_backend_files() {
     
     log_info "Файлы бэкенда скопированы"
 }
+
+# ============================================================================
+# КОПИРОВАНИЕ ФАЙЛОВ ФРОНТЕНДА
+# ============================================================================
+
+copy_frontend_files() {
+    log_info "Копирование файлов фронтенда..."
+    
+    # Создание целевых директорий
+    ensure_dir "$TARGET_FRONTEND/pages"
+    ensure_dir "$TARGET_FRONTEND/services"
+    
+    # Копирование с бэкапом существующих файлов
+    local files=(
+        "pages/Settings.tsx"
+        "pages/Audit.tsx"
+        "services/settingsService.ts"
+        "services/auditService.ts"
+    )
+    
+    for file in "${files[@]}"; do
+        local src="$INSTALLER_FRONTEND_SRC/$file"
+        local dst="$TARGET_FRONTEND/$file"
+        
+        if [[ -f "$src" ]]; then
+            backup_file "$dst"
+            cp "$src" "$dst"
+            log_info "  ✓ $file"
+        else
+            log_warn "  ✗ $file не найден в installer, пропускаем"
+        fi
+    done
+    
+    # Установка прав
+    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$TARGET_FRONTEND/pages" 2>/dev/null || true
+    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$TARGET_FRONTEND/services" 2>/dev/null || true
+    
+    log_info "Файлы фронтенда скопированы"
+}
+
+# ============================================================================
+# КОПИРОВАНИЕ УТИЛИТ
+# ============================================================================
+
+copy_utils_files() {
+    log_info "Копирование утилит..."
+    
+    ensure_dir "$TARGET_APP/utils"
+    
+    if [[ -f "$INSTALLER_APP_SRC/utils/audit_helper.py" ]]; then
+        cp "$INSTALLER_APP_SRC/utils/audit_helper.py" "$TARGET_APP/utils/"
+        chown "$GOCHS_USER:$GOCHS_GROUP" "$TARGET_APP/utils/audit_helper.py" 2>/dev/null || true
+        log_info "  ✓ utils/audit_helper.py"
+    fi
+}
+
+# ============================================================================
+# ИСПРАВЛЕНИЕ ИМПОРТОВ ИКОНОК
+# ============================================================================
 
 fix_settings_imports() {
     log_info "Проверка и исправление импортов в Settings.tsx..."
@@ -299,8 +338,9 @@ fix_settings_imports() {
 }
 
 # ============================================================================
-# ВАЖНО! ПОЛНОСТЬЮ ПЕРЕСОЗДАЕТ __init__.py С ГАРАНТИРОВАННЫМ ПОДКЛЮЧЕНИЕМ АУДИТА
+# ОБНОВЛЕНИЕ API РОУТЕРОВ (ПОЛНОЕ ПЕРЕСОЗДАНИЕ)
 # ============================================================================
+
 update_api_routers() {
     log_info "Обновление API роутеров (полное пересоздание)..."
     
@@ -323,96 +363,105 @@ logger = logging.getLogger(__name__)
 api_router = APIRouter()
 
 # ============================================================================
-# ИМПОРТЫ И ПОДКЛЮЧЕНИЕ ВСЕХ ЭНДПОИНТОВ
+# AUTH - префикс /auth
 # ============================================================================
-
-# Auth
 try:
     from app.api.v1.endpoints import auth
     if hasattr(auth, 'router'):
         api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
-        logger.info("✓ Auth endpoints registered")
+        logger.info("✓ Auth endpoints registered at /auth")
 except ImportError:
     pass
 
-# Users
+# ============================================================================
+# USERS - префикс /users
+# ============================================================================
 try:
     from app.api.v1.endpoints import users
     if hasattr(users, 'router'):
         api_router.include_router(users.router, prefix="/users", tags=["users"])
-        logger.info("✓ Users endpoints registered")
+        logger.info("✓ Users endpoints registered at /users")
 except ImportError:
     pass
 
-# Contacts
+# ============================================================================
+# CONTACTS - префикс /contacts
+# ============================================================================
 try:
     from app.api.v1.endpoints import contacts
     if hasattr(contacts, 'router'):
         api_router.include_router(contacts.router, prefix="/contacts", tags=["contacts"])
-        logger.info("✓ Contacts endpoints registered")
 except ImportError:
     pass
 
-# Groups
+# ============================================================================
+# GROUPS - префикс /groups
+# ============================================================================
 try:
     from app.api.v1.endpoints import groups
     if hasattr(groups, 'router'):
         api_router.include_router(groups.router, prefix="/groups", tags=["groups"])
-        logger.info("✓ Groups endpoints registered")
 except ImportError:
     pass
 
-# Scenarios
+# ============================================================================
+# SCENARIOS - префикс /scenarios
+# ============================================================================
 try:
     from app.api.v1.endpoints import scenarios
     if hasattr(scenarios, 'router'):
         api_router.include_router(scenarios.router, prefix="/scenarios", tags=["scenarios"])
-        logger.info("✓ Scenarios endpoints registered")
 except ImportError:
     pass
 
-# Campaigns
+# ============================================================================
+# CAMPAIGNS - префикс /campaigns
+# ============================================================================
 try:
     from app.api.v1.endpoints import campaigns
     if hasattr(campaigns, 'router'):
         api_router.include_router(campaigns.router, prefix="/campaigns", tags=["campaigns"])
-        logger.info("✓ Campaigns endpoints registered")
 except ImportError:
     pass
 
-# Inbound
+# ============================================================================
+# INBOUND - префикс /inbound
+# ============================================================================
 try:
     from app.api.v1.endpoints import inbound
     if hasattr(inbound, 'router'):
         api_router.include_router(inbound.router, prefix="/inbound", tags=["inbound"])
-        logger.info("✓ Inbound endpoints registered")
 except ImportError:
     pass
 
-# Playbooks
+# ============================================================================
+# PLAYBOOKS - префикс /playbooks
+# ============================================================================
 try:
     from app.api.v1.endpoints import playbooks
     if hasattr(playbooks, 'router'):
         api_router.include_router(playbooks.router, prefix="/playbooks", tags=["playbooks"])
-        logger.info("✓ Playbooks endpoints registered")
 except ImportError:
     pass
 
-# Settings (ОБЯЗАТЕЛЬНЫЙ)
+# ============================================================================
+# SETTINGS - префикс /settings
+# ============================================================================
 try:
     from app.api.v1.endpoints import settings
     if hasattr(settings, 'router'):
         api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
-        logger.info("✓ Settings endpoints registered")
+        logger.info("✓ Settings endpoints registered at /settings")
 except ImportError:
-    logger.error("Settings endpoints not available")
+    pass
 
-# Monitoring
+# ============================================================================
+# MONITORING - префикс /monitoring
+# ============================================================================
 try:
     from app.api.v1.endpoints import monitoring
     if hasattr(monitoring, 'router'):
         api_router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring"])
-        logger.info("✓ Monitoring endpoints registered")
 except ImportError:
     pass
 
@@ -423,7 +472,7 @@ try:
     from app.api.v1.endpoints import audit
     if hasattr(audit, 'router'):
         api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
-        logger.info("✓ Audit endpoints registered")
+        logger.info("✓ Audit endpoints registered at /audit")
     else:
         raise ImportError("Audit router not found")
 except ImportError as e:
@@ -452,20 +501,9 @@ except ImportError as e:
     @stub.get("/stats")
     async def stub_audit_stats():
         return {
-            "total_events": 0,
-            "today_events": 0,
-            "week_events": 0,
-            "month_events": 0,
-            "unique_users": 0,
-            "error_events": 0,
-            "warning_events": 0,
-            "success_events": 0,
-            "top_actions": [],
-            "top_entities": [],
-            "top_users": [],
-            "recent_activity": [],
-            "hourly_stats": [],
-            "daily_stats": []
+            "total_events": 0, "today_events": 0, "week_events": 0, "month_events": 0,
+            "unique_users": 0, "error_events": 0, "warning_events": 0, "success_events": 0,
+            "top_actions": [], "top_entities": [], "top_users": [], "recent_activity": []
         }
     
     @stub.get("/export")
@@ -478,59 +516,12 @@ except ImportError as e:
             headers={"Content-Disposition": "attachment; filename=audit.csv"}
         )
     
-    @stub.delete("/logs")
-    async def stub_clear_logs(older_than_days: int = 90):
-        return {"message": "No logs to delete", "deleted_count": 0}
-    
-    @stub.get("/logs/{log_id}")
-    async def stub_get_log(log_id: str):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Audit log not found")
-    
-    @stub.post("/log")
-    async def stub_create_log():
-        return {"success": True, "message": "Event logged (stub)"}
-    
     api_router.include_router(stub, prefix="/audit", tags=["audit"])
-    logger.warning("✓ Audit STUB endpoints registered")
+    logger.warning("✓ Audit STUB endpoints registered at /audit")
 
-# Reports
-try:
-    from app.api.v1.endpoints import reports
-    if hasattr(reports, 'router'):
-        api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
-        logger.info("✓ Reports endpoints registered")
-except ImportError:
-    pass
-
-# TTS
-try:
-    from app.api.v1.endpoints import tts
-    if hasattr(tts, 'router'):
-        api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
-        logger.info("✓ TTS endpoints registered")
-except ImportError:
-    pass
-
-# STT
-try:
-    from app.api.v1.endpoints import stt
-    if hasattr(stt, 'router'):
-        api_router.include_router(stt.router, prefix="/stt", tags=["stt"])
-        logger.info("✓ STT endpoints registered")
-except ImportError:
-    pass
-
-# WebSocket
-try:
-    from app.api.v1.endpoints import websocket
-    if hasattr(websocket, 'router'):
-        api_router.include_router(websocket.router, prefix="/ws", tags=["websocket"])
-        logger.info("✓ WebSocket endpoints registered")
-except ImportError:
-    pass
-
-# Health (без префикса)
+# ============================================================================
+# HEALTH - без префикса
+# ============================================================================
 try:
     from app.api.v1.endpoints import health
     if hasattr(health, 'router'):
@@ -547,8 +538,9 @@ ROUTER_EOF
 }
 
 # ============================================================================
-# НОВАЯ ФУНКЦИЯ - ПРОВЕРКА ПОДКЛЮЧЕНИЯ АУДИТА
+# ПРОВЕРКА ПОДКЛЮЧЕНИЯ АУДИТА
 # ============================================================================
+
 verify_audit_connected() {
     log_info "Проверка подключения аудита..."
     
@@ -577,6 +569,10 @@ verify_audit_connected() {
     fi
 }
 
+# ============================================================================
+# СОЗДАНИЕ ТАБЛИЦЫ АУДИТА
+# ============================================================================
+
 create_audit_table() {
     log_info "Создание таблицы аудита в базе данных..."
     
@@ -594,26 +590,32 @@ create_audit_table() {
     cat > /tmp/create_audit_table.sql << 'EOF'
 -- Таблица аудита действий
 CREATE TABLE IF NOT EXISTS audit_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID,
     user_name VARCHAR(255),
     user_role VARCHAR(50),
     action VARCHAR(100) NOT NULL,
     entity_type VARCHAR(50),
     entity_id UUID,
+    entity_name VARCHAR(255),
     details JSONB,
     ip_address VARCHAR(45),
     user_agent TEXT,
+    request_method VARCHAR(10),
+    request_path VARCHAR(500),
     status VARCHAR(20) DEFAULT 'success',
+    error_message TEXT,
+    execution_time_ms INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Индексы для быстрого поиска
-CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_type ON audit_logs(entity_type);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_status ON audit_logs(status);
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_user_name ON audit_logs(user_name);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_entity_type ON audit_logs(entity_type);
+CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status);
 EOF
 
     # Выполнение SQL
@@ -621,12 +623,15 @@ EOF
         log_info "✓ Таблица audit_logs создана"
     else
         log_error "Ошибка создания таблицы audit_logs"
-        # Пробуем создать через sudo если psql не сработал
         sudo -u postgres psql -d "$POSTGRES_DB" -f /tmp/create_audit_table.sql 2>/dev/null && log_info "✓ Таблица audit_logs создана (через sudo)"
     fi
     
     rm -f /tmp/create_audit_table.sql
 }
+
+# ============================================================================
+# ИСПРАВЛЕНИЕ ПРАВ В БАЗЕ ДАННЫХ
+# ============================================================================
 
 fix_database_permissions() {
     log_step "Проверка и исправление прав в базе данных"
@@ -635,9 +640,8 @@ fix_database_permissions() {
         POSTGRES_PASSWORD=$(grep -oP 'POSTGRES_PASSWORD=\K.*' "$INSTALL_DIR/.env" 2>/dev/null || echo "")
     fi
     
-    log_info "Проверка владельца базы данных..."
+    log_info "Настройка прав доступа для $POSTGRES_USER..."
     
-    # Функция выполнения SQL
     run_sql() {
         if [[ -n "$POSTGRES_PASSWORD" ]]; then
             PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1" 2>/dev/null
@@ -646,63 +650,17 @@ fix_database_permissions() {
         fi
     }
     
-    # Проверка текущего владельца БД
-    local current_owner=$(run_sql "SELECT datowner FROM pg_database WHERE datname = '$POSTGRES_DB';" | grep -v "datowner" | grep -v "^-" | grep -v "row" | xargs)
-    
-    log_info "Текущий владелец БД '$POSTGRES_DB': ${current_owner:-не определен}"
-    
-    if [[ "$current_owner" != "$POSTGRES_USER" ]]; then
-        log_warn "Владелец БД не соответствует $POSTGRES_USER, исправляем..."
-        
-        if [[ -n "$POSTGRES_PASSWORD" ]]; then
-            PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER DATABASE $POSTGRES_DB OWNER TO $POSTGRES_USER;" 2>/dev/null
-        else
-            sudo -u postgres psql -c "ALTER DATABASE $POSTGRES_DB OWNER TO $POSTGRES_USER;" 2>/dev/null
-        fi
-        log_info "✓ Владелец БД изменен на $POSTGRES_USER"
-    else
-        log_info "✓ Владелец БД корректен"
-    fi
-    
-    log_info "Проверка владельца схемы public..."
-    
-    local schema_owner=$(run_sql "SELECT nspowner::regrole FROM pg_namespace WHERE nspname = 'public';" | grep -v "nspowner" | grep -v "^-" | grep -v "row" | xargs)
-    log_info "Текущий владелец схемы public: ${schema_owner:-не определен}"
-    
-    if [[ "$schema_owner" != "$POSTGRES_USER" ]]; then
-        log_warn "Владелец схемы public не соответствует $POSTGRES_USER, исправляем..."
-        run_sql "ALTER SCHEMA public OWNER TO $POSTGRES_USER;" 2>/dev/null
-        log_info "✓ Владелец схемы public изменен на $POSTGRES_USER"
-    else
-        log_info "✓ Владелец схемы public корректен"
-    fi
-    
-    log_info "Настройка прав доступа для $POSTGRES_USER..."
-    
-    # Гранты
     run_sql "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
     run_sql "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
-    run_sql "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
-    run_sql "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO $POSTGRES_USER;" 2>/dev/null
-    run_sql "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO $POSTGRES_USER;" 2>/dev/null
+    run_sql "ALTER SCHEMA public OWNER TO $POSTGRES_USER;" 2>/dev/null
     run_sql "GRANT ALL ON SCHEMA public TO $POSTGRES_USER;" 2>/dev/null
     
     log_info "✓ Права доступа настроены"
-    
-    # Проверка прав на таблицу audit_logs
-    log_info "Проверка прав на таблицу audit_logs..."
-    local has_privileges=$(run_sql "SELECT has_table_privilege('$POSTGRES_USER', 'audit_logs', 'INSERT, SELECT, UPDATE, DELETE');" 2>/dev/null | grep -o '[tf]')
-    
-    if [[ "$has_privileges" == "t" ]]; then
-        log_info "✓ Права на audit_logs корректны"
-    else
-        log_warn "Исправляем права на audit_logs..."
-        run_sql "GRANT ALL PRIVILEGES ON TABLE audit_logs TO $POSTGRES_USER;" 2>/dev/null
-        log_info "✓ Права на audit_logs исправлены"
-    fi
-    
-    log_info "Проверка прав завершена"
 }
+
+# ============================================================================
+# ОБНОВЛЕНИЕ ИМПОРТОВ В FRONTEND
+# ============================================================================
 
 update_frontend_imports() {
     log_info "Обновление импортов в App.tsx..."
@@ -712,36 +670,25 @@ update_frontend_imports() {
     if [[ -f "$app_tsx" ]]; then
         backup_file "$app_tsx"
         
-        # Проверяем, есть ли уже импорт Settings
         if ! grep -q "import Settings from '@pages/Settings';" "$app_tsx"; then
             sed -i "/import.*from '@pages\/.*';/a import Settings from '@pages/Settings';" "$app_tsx"
         fi
         
-        # Проверяем, есть ли уже импорт Audit
         if ! grep -q "import Audit from '@pages/Audit';" "$app_tsx"; then
             sed -i "/import.*from '@pages\/.*';/a import Audit from '@pages/Audit';" "$app_tsx"
         fi
         
-        # Проверяем, есть ли уже Route для Settings
         if ! grep -q 'path="settings"' "$app_tsx"; then
-            if grep -q 'path="users"' "$app_tsx"; then
-                sed -i '/path="users"/i \          <Route path="settings" element={<Settings />} />' "$app_tsx"
-            else
-                sed -i '/<\/Routes>/i \          <Route path="settings" element={<Settings />} />' "$app_tsx"
-            fi
+            sed -i '/<\/Routes>/i \          <Route path="settings" element={<Settings />} />' "$app_tsx"
         fi
         
-        # Проверяем, есть ли уже Route для Audit
         if ! grep -q 'path="audit"' "$app_tsx"; then
             sed -i '/<\/Routes>/i \          <Route path="audit" element={<Audit />} />' "$app_tsx"
         fi
         
         log_info "✓ App.tsx обновлен"
-    else
-        log_warn "Файл App.tsx не найден"
     fi
     
-    # Обновление Layout для добавления пунктов меню
     update_layout_menu
 }
 
@@ -753,26 +700,25 @@ update_layout_menu() {
     if [[ -f "$layout_file" ]]; then
         backup_file "$layout_file"
         
-        # Добавляем импорты иконок если нужно
         if ! grep -q "AuditOutlined" "$layout_file"; then
             sed -i "s/import {/import { AuditOutlined, SettingOutlined, /" "$layout_file"
         fi
         
-        # Проверяем, есть ли пункт меню "Настройки"
         if ! grep -q "key: '/settings'" "$layout_file"; then
             sed -i "/const adminMenuItems = \[/a \    { key: '\/settings', icon: <SettingOutlined \/>, label: 'Настройки' }," "$layout_file"
         fi
         
-        # Проверяем, есть ли пункт меню "Аудит"
         if ! grep -q "key: '/audit'" "$layout_file"; then
             sed -i "/const adminMenuItems = \[/a \    { key: '\/audit', icon: <AuditOutlined \/>, label: 'Аудит' }," "$layout_file"
         fi
         
         log_info "✓ Layout меню обновлено"
-    else
-        log_warn "Файл Layout/index.tsx не найден"
     fi
 }
+
+# ============================================================================
+# ПЕРЕСБОРКА ФРОНТЕНДА
+# ============================================================================
 
 rebuild_frontend() {
     log_info "Пересборка фронтенда..."
@@ -784,13 +730,11 @@ rebuild_frontend() {
     
     cd "$INSTALL_DIR/frontend"
     
-    # Проверка наличия node_modules
     if [[ ! -d "node_modules" ]]; then
         log_info "Установка зависимостей npm..."
         npm install --legacy-peer-deps 2>&1 | tail -5
     fi
     
-    # Сборка
     log_info "Запуск сборки React..."
     if npm run build 2>&1 | tail -10; then
         log_info "✓ Фронтенд успешно пересобран"
@@ -800,11 +744,14 @@ rebuild_frontend() {
         fi
     else
         log_warn "⚠ Сборка фронтенда завершилась с ошибками"
-        log_info "Попробуйте пересобрать вручную: cd $INSTALL_DIR/frontend && npm run build"
     fi
     
     cd "$SCRIPT_DIR"
 }
+
+# ============================================================================
+# ПЕРЕЗАПУСК СЕРВИСОВ
+# ============================================================================
 
 restart_services() {
     log_info "Перезапуск сервисов..."
@@ -828,38 +775,41 @@ restart_services() {
         log_info "✓ API сервис работает"
     else
         log_warn "✗ API сервис не запущен"
-        log_info "Проверьте: systemctl status gochs-api.service"
-        log_info "Логи: journalctl -u gochs-api.service -n 20"
     fi
 }
+
+# ============================================================================
+# УДАЛЕНИЕ
+# ============================================================================
 
 uninstall() {
     log_step "Удаление модуля ${MODULE_NAME}"
     
-    # Удаление файлов фронтенда
     rm -f "$TARGET_FRONTEND/pages/Settings.tsx" 2>/dev/null
     rm -f "$TARGET_FRONTEND/pages/Audit.tsx" 2>/dev/null
     rm -f "$TARGET_FRONTEND/services/settingsService.ts" 2>/dev/null
     rm -f "$TARGET_FRONTEND/services/auditService.ts" 2>/dev/null
     
-    # Удаление файлов бэкенда
     rm -f "$TARGET_APP/api/v1/endpoints/settings.py" 2>/dev/null
     rm -f "$TARGET_APP/api/v1/endpoints/audit.py" 2>/dev/null
     rm -f "$TARGET_APP/schemas/settings.py" 2>/dev/null
     rm -f "$TARGET_APP/schemas/audit.py" 2>/dev/null
     rm -f "$TARGET_APP/models/audit_log.py" 2>/dev/null
+    rm -f "$TARGET_APP/utils/audit_helper.py" 2>/dev/null
     
     log_info "Файлы модуля удалены"
-    
     return 0
 }
+
+# ============================================================================
+# ПРОВЕРКА СТАТУСА
+# ============================================================================
 
 check_status() {
     local status=0
     
     log_info "Проверка статуса модуля ${MODULE_NAME}"
     
-    # Проверка файлов фронтенда
     local frontend_files=(
         "$TARGET_FRONTEND/pages/Settings.tsx"
         "$TARGET_FRONTEND/pages/Audit.tsx"
@@ -877,7 +827,6 @@ check_status() {
         fi
     done
     
-    # Проверка файлов бэкенда
     local backend_files=(
         "$TARGET_APP/api/v1/endpoints/settings.py"
         "$TARGET_APP/api/v1/endpoints/audit.py"
@@ -896,16 +845,6 @@ check_status() {
         fi
     done
     
-    # Проверка таблицы в БД
-    log_info "Проверка таблицы audit_logs..."
-    if PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt audit_logs" 2>/dev/null | grep -q "audit_logs"; then
-        log_info "  ✓ Таблица audit_logs существует"
-    else
-        log_warn "  ✗ Таблица audit_logs не найдена"
-        status=1
-    fi
-    
-    # Проверка эндпоинта аудита
     log_info "Проверка эндпоинта /api/v1/audit/stats..."
     local response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/audit/stats 2>/dev/null)
     if [[ "$response" == "200" || "$response" == "401" || "$response" == "403" ]]; then
@@ -918,7 +857,10 @@ check_status() {
     return $status
 }
 
-# Обработка аргументов
+# ============================================================================
+# ОБРАБОТКА АРГУМЕНТОВ
+# ============================================================================
+
 case "${1:-}" in
     install)
         install
