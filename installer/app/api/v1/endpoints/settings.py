@@ -391,7 +391,7 @@ def reload_asterisk_pjsip() -> Dict[str, Any]:
     return result
 
 
-ddef check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
+def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
     """Проверка статуса исходящей регистрации на FreePBX"""
     result = {
         "registered": False,
