@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Settings endpoints - полная исправленная версия с сохранением в файлы"""
+"""Settings endpoints - ПОЛНАЯ ВЕРСИЯ С СОХРАНЕНИЕМ В ФАЙЛЫ"""
 
 import os
 import re
 import logging
+import socket
+import subprocess
+import json
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -14,6 +18,82 @@ router = APIRouter()
 # Пути к файлам конфигурации
 ENV_FILE = "/opt/gochs-informing/.env"
 CRED_FILE = "/root/.gochs_credentials"
+ASTERISK_PJSIP_CONF = "/etc/asterisk/pjsip.conf"
+
+
+# ============================================================================
+# PYDANTIC МОДЕЛИ
+# ============================================================================
+
+class PBXSettingsResponse(BaseModel):
+    host: str
+    port: int
+    extension: str
+    username: str
+    password: str
+    transport: str = "udp"
+    max_channels: int = 20
+    codecs: List[str] = ["ulaw", "alaw"]
+    register_enabled: bool = True
+
+
+class PBXStatusResponse(BaseModel):
+    registered: bool
+    message: str = ""
+    host: Optional[str] = None
+    port: Optional[int] = None
+    extension: Optional[str] = None
+
+
+class PBXTestResponse(BaseModel):
+    success: bool
+    message: str = ""
+    error: Optional[str] = None
+
+
+class PBXReloadResponse(BaseModel):
+    message: str
+    success: bool = True
+
+
+class SystemSettingsResponse(BaseModel):
+    app_name: str
+    timezone: str
+    log_level: str
+    max_concurrent_calls: int
+    recording_retention_days: int
+    backup_enabled: bool
+    backup_time: str
+
+
+class SecuritySettingsResponse(BaseModel):
+    jwt_expire_minutes: int
+    refresh_token_expire_days: int
+    max_login_attempts: int
+    lockout_minutes: int
+    password_min_length: int
+    require_special_chars: bool
+    session_timeout_minutes: int
+
+
+class NotificationSettingsResponse(BaseModel):
+    email_enabled: bool
+    smtp_server: str
+    smtp_port: int
+    smtp_username: str
+    smtp_password: str
+    from_email: str
+    admin_email: str
+    notify_on_campaign_complete: bool
+    notify_on_system_error: bool
+
+
+class AllSettingsResponse(BaseModel):
+    pbx: PBXSettingsResponse
+    system: SystemSettingsResponse
+    security: SecuritySettingsResponse
+    notifications: NotificationSettingsResponse
+
 
 # ============================================================================
 # ФУНКЦИИ РАБОТЫ С КОНФИГУРАЦИЕЙ
@@ -189,8 +269,12 @@ def get_freepbx_config() -> Dict[str, Any]:
     if env_enabled:
         config["register_enabled"] = env_enabled.lower() == "true"
     
+    env_codecs = read_env_value("FREEPBX_CODECS", "")
+    if env_codecs:
+        config["codecs"] = env_codecs.split(',')
+    
     # Если настройки пустые - читаем из credentials
-    if not config["host"] or not config["extension"]:
+    if not config["host"] or config["host"] == "192.168.0.6":
         creds = read_credentials()
         if creds["freepbx"]["host"]:
             config["host"] = creds["freepbx"]["host"]
@@ -204,77 +288,151 @@ def get_freepbx_config() -> Dict[str, Any]:
     return config
 
 
-# ============================================================================
-# PYDANTIC МОДЕЛИ ДЛЯ ОТВЕТОВ
-# ============================================================================
+def update_asterisk_pjsip_config(config: Dict[str, Any]) -> bool:
+    """Обновление конфигурации PJSIP в Asterisk"""
+    try:
+        if not os.path.exists(ASTERISK_PJSIP_CONF):
+            logger.warning(f"PJSIP config not found: {ASTERISK_PJSIP_CONF}")
+            return False
+        
+        with open(ASTERISK_PJSIP_CONF, 'r') as f:
+            content = f.read()
+        
+        registration_section = f"""; =====================================================
+; РЕГИСТРАЦИЯ НА FREE PBX (автоматически сгенерировано)
+; =====================================================
+[freepbx-registration]
+type = registration
+outbound_auth = freepbx-auth
+server_uri = sip:{config['host']}:{config['port']}
+client_uri = sip:{config['extension']}@{config['host']}:{config['port']}
+contact_user = {config['extension']}
+retry_interval = 30
+expiration = 3600
 
-class PBXSettingsResponse(BaseModel):
-    host: str
-    port: int
-    extension: str
-    username: str
-    password: str
-    transport: str = "udp"
-    max_channels: int = 20
-    codecs: List[str] = ["ulaw", "alaw"]
-    register_enabled: bool = True
+[freepbx-auth]
+type = auth
+auth_type = userpass
+username = {config['extension']}
+password = {config['password']}
+realm = asterisk
+
+[freepbx]
+type = endpoint
+context = gochs-inbound
+aors = freepbx-aor
+outbound_auth = freepbx-auth
+disallow = all
+allow = {','.join(config['codecs'])}
+dtmf_mode = rfc4733
+rtp_symmetric = yes
+force_rport = yes
+rewrite_contact = yes
+direct_media = no
+callerid = "GOCHS" <{config['extension']}>
+from_user = {config['extension']}
+from_domain = {config['host']}
+
+[freepbx-aor]
+type = aor
+contact = sip:{config['host']}:{config['port']}
+max_contacts = 1
+remove_existing = yes
+
+[freepbx-identify]
+type = identify
+endpoint = freepbx
+match = {config['host']}
+"""
+        
+        pattern = r'; =+.*?РЕГИСТРАЦИЯ НА FREE PBX.*?\[freepbx-identify\][^\[]*'
+        if re.search(pattern, content, re.DOTALL):
+            content = re.sub(pattern, registration_section, content, flags=re.DOTALL)
+        else:
+            content += "\n" + registration_section
+        
+        with open(ASTERISK_PJSIP_CONF, 'w') as f:
+            f.write(content)
+        
+        logger.info("Asterisk PJSIP config updated")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error updating PJSIP config: {e}")
+        return False
 
 
-class PBXStatusResponse(BaseModel):
-    registered: bool
-    message: str = ""
-    host: Optional[str] = None
-    port: Optional[int] = None
+def reload_asterisk_pjsip() -> Dict[str, Any]:
+    """Перезагрузка PJSIP в Asterisk"""
+    result = {"success": False, "message": ""}
+    
+    try:
+        cmd = ["asterisk", "-rx", "pjsip reload"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        if proc.returncode == 0:
+            result["success"] = True
+            result["message"] = "PJSIP reloaded successfully"
+            return result
+        
+        cmd = ["systemctl", "reload", "asterisk"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        if proc.returncode == 0:
+            result["success"] = True
+            result["message"] = "Asterisk reloaded via systemctl"
+            return result
+        
+        result["message"] = "All reload methods failed"
+        
+    except Exception as e:
+        result["message"] = f"Reload error: {str(e)}"
+    
+    return result
 
 
-class PBXTestResponse(BaseModel):
-    success: bool
-    message: str = ""
-    error: Optional[str] = None
-
-
-class SystemSettingsResponse(BaseModel):
-    app_name: str
-    timezone: str
-    log_level: str
-    max_concurrent_calls: int
-    recording_retention_days: int
-    backup_enabled: bool
-    backup_time: str
-
-
-class SecuritySettingsResponse(BaseModel):
-    jwt_expire_minutes: int
-    refresh_token_expire_days: int
-    max_login_attempts: int
-    lockout_minutes: int
-    password_min_length: int
-    require_special_chars: bool
-    session_timeout_minutes: int
-
-
-class NotificationSettingsResponse(BaseModel):
-    email_enabled: bool
-    smtp_server: str
-    smtp_port: int
-    smtp_username: str
-    smtp_password: str
-    from_email: str
-    admin_email: str
-    notify_on_campaign_complete: bool
-    notify_on_system_error: bool
-
-
-class CredentialsInfoResponse(BaseModel):
-    freepbx: Dict[str, Any]
-    postgresql: Dict[str, Any]
-    redis: Dict[str, Any]
-    asterisk: Dict[str, Any]
+def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Проверка статуса регистрации в Asterisk"""
+    result = {
+        "registered": False,
+        "message": "",
+        "host": config["host"],
+        "port": config["port"],
+        "extension": config["extension"]
+    }
+    
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3)
+        connect_result = sock.connect_ex((config["host"], config["port"]))
+        sock.close()
+        
+        if connect_result == 0:
+            result["registered"] = True
+            result["message"] = "Порт доступен"
+        else:
+            result["message"] = "Порт недоступен"
+            
+    except Exception as e:
+        result["message"] = f"Ошибка проверки: {str(e)}"
+    
+    return result
 
 
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
+
+@router.get("/all", response_model=AllSettingsResponse)
+async def get_all_settings():
+    """Получение всех настроек одним запросом"""
+    return {
+        "pbx": await get_pbx_settings(),
+        "system": await get_system_settings(),
+        "security": await get_security_settings(),
+        "notifications": await get_notification_settings()
+    }
+
 
 @router.get("/pbx", response_model=PBXSettingsResponse)
 async def get_pbx_settings():
@@ -328,16 +486,32 @@ async def update_pbx_settings(data: Dict[str, Any]):
     return await get_pbx_settings()
 
 
+@router.post("/pbx/apply")
+async def apply_pbx_settings(background_tasks: BackgroundTasks):
+    """Применение настроек FreePBX к Asterisk"""
+    config = get_freepbx_config()
+    
+    config_updated = update_asterisk_pjsip_config(config)
+    
+    def reload_task():
+        reload_asterisk_pjsip()
+    
+    background_tasks.add_task(reload_task)
+    
+    status = check_registration_status(config)
+    
+    return {
+        "message": "Настройки применены" if config_updated else "Ошибка применения",
+        "config_updated": config_updated,
+        "registration_status": status
+    }
+
+
 @router.get("/pbx/status", response_model=PBXStatusResponse)
 async def check_pbx_status():
     """Проверка статуса регистрации в FreePBX"""
     config = get_freepbx_config()
-    return {
-        "registered": True,
-        "message": "Зарегистрирован",
-        "host": config["host"],
-        "port": config["port"]
-    }
+    return check_registration_status(config)
 
 
 @router.post("/pbx/test", response_model=PBXTestResponse)
@@ -349,14 +523,25 @@ async def test_pbx_connection(data: Dict[str, Any]):
     if not host:
         return {"success": False, "message": "Не указан хост", "error": "Host is required"}
     
-    return {"success": True, "message": f"Подключение к {host}:{port} успешно", "error": None}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        
+        if result == 0:
+            return {"success": True, "message": f"Подключение к {host}:{port} успешно"}
+        else:
+            return {"success": False, "message": f"Не удалось подключиться", "error": "Connection refused"}
+    except Exception as e:
+        return {"success": False, "message": "Ошибка подключения", "error": str(e)}
 
 
-@router.post("/pbx/reload")
+@router.post("/pbx/reload", response_model=PBXReloadResponse)
 async def reload_pbx_config():
     """Принудительная перезагрузка PJSIP"""
-    logger.info("PJSIP reload requested")
-    return {"message": "PJSIP configuration reloaded", "success": True}
+    result = reload_asterisk_pjsip()
+    return {"message": result["message"], "success": result["success"]}
 
 
 @router.get("/system", response_model=SystemSettingsResponse)
@@ -448,7 +633,7 @@ async def get_notification_settings():
         "smtp_password": read_env_value("SMTP_PASSWORD", ""),
         "from_email": read_env_value("FROM_EMAIL", ""),
         "admin_email": read_env_value("ADMIN_EMAIL", ""),
-        "notify_on_campaign_complete": read_env_value("NOTIFY_CAMPAIGN_COMPLETE", "99-postfix.sh").lower() == "true",
+        "notify_on_campaign_complete": read_env_value("NOTIFY_CAMPAIGN_COMPLETE", "true").lower() == "true",
         "notify_on_system_error": read_env_value("NOTIFY_SYSTEM_ERROR", "true").lower() == "true"
     }
 
@@ -482,10 +667,11 @@ async def update_notification_settings(data: Dict[str, Any]):
     return await get_notification_settings()
 
 
-@router.get("/credentials", response_model=CredentialsInfoResponse)
+@router.get("/credentials")
 async def get_credentials_info():
     """Получение информации об учетных данных (без паролей)"""
     creds = read_credentials()
+    
     return {
         "freepbx": {
             "host": creds["freepbx"]["host"],
@@ -509,22 +695,10 @@ async def get_credentials_info():
     }
 
 
-@router.get("/all")
-async def get_all_settings():
-    """Получение всех настроек одним запросом"""
-    return {
-        "pbx": await get_pbx_settings(),
-        "system": await get_system_settings(),
-        "security": await get_security_settings(),
-        "notifications": await get_notification_settings()
-    }
-
-
 @router.post("/backup")
 async def create_backup(background_tasks: BackgroundTasks):
     """Создание резервной копии настроек"""
     import tarfile
-    from datetime import datetime
     
     backup_dir = "/opt/gochs-informing/backups"
     os.makedirs(backup_dir, exist_ok=True)
@@ -552,8 +726,6 @@ async def create_backup(background_tasks: BackgroundTasks):
 @router.get("/backups")
 async def list_backups():
     """Список резервных копий настроек"""
-    from datetime import datetime
-    
     backup_dir = "/opt/gochs-informing/backups"
     backups = []
     
@@ -570,3 +742,41 @@ async def list_backups():
                 })
     
     return {"backups": backups[:10]}
+
+
+@router.post("/reset")
+async def reset_settings():
+    """Сброс настроек к значениям по умолчанию"""
+    default_settings = {
+        "FREEPBX_HOST": "192.168.1.10:5060",
+        "FREEPBX_PORT": "5060",
+        "FREEPBX_EXTENSION": "gochs",
+        "FREEPBX_USERNAME": "gochs",
+        "FREEPBX_PASSWORD": "",
+        "FREEPBX_TRANSPORT": "udp",
+        "FREEPBX_ENABLED": "true",
+        "MAX_CONCURRENT_CALLS": "20",
+        "APP_NAME": "ГО-ЧС Информирование",
+        "TIMEZONE": "Europe/Moscow",
+        "LOG_LEVEL": "INFO",
+        "RECORDING_RETENTION_DAYS": "90",
+        "BACKUP_ENABLED": "true",
+        "BACKUP_TIME": "02:00",
+        "JWT_EXPIRE_MINUTES": "60",
+        "REFRESH_TOKEN_EXPIRE_DAYS": "7",
+        "MAX_LOGIN_ATTEMPTS": "5",
+        "LOCKOUT_MINUTES": "15",
+        "PASSWORD_MIN_LENGTH": "8",
+        "REQUIRE_SPECIAL_CHARS": "true",
+        "SESSION_TIMEOUT_MINUTES": "30",
+        "EMAIL_ENABLED": "89-postfix.sh",
+        "SMTP_PORT": "587",
+        "NOTIFY_CAMPAIGN_COMPLETE": "true",
+        "NOTIFY_SYSTEM_ERROR": "true"
+    }
+    
+    for key, value in default_settings.items():
+        write_env_value(key, value)
+    
+    logger.info("Settings reset to defaults")
+    return {"message": "Settings reset to defaults", "success": True}
