@@ -404,42 +404,38 @@ def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
     import subprocess
     
     try:
-        # Пробуем с флагом -g чтобы избежать ошибки alwaysfork
-        cmd = ["/usr/sbin/asterisk", "-g", "-rx", "pjsip show registrations"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        # Используем shell=True для обхода проблем с alwaysfork
+        cmd = "/usr/sbin/asterisk -rx 'pjsip show registrations' 2>&1"
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
         
-        if proc.returncode == 0:
-            output = proc.stdout
-            
-            # Ищем freepbx-registration
-            for line in output.split('\n'):
-                if 'freepbx-registration' in line:
-                    if 'Registered' in line:
-                        result["registered"] = True
-                        result["message"] = "Зарегистрирован"
-                    elif 'Rejected' in line:
-                        result["message"] = "Отклонено (проверьте пароль)"
-                    elif 'AuthSent' in line:
-                        result["message"] = "Ожидание аутентификации"
+        # Объединяем stdout и stderr (там может быть полезная информация)
+        output = proc.stdout + proc.stderr
+        
+        # Ищем freepbx-registration и статус Registered
+        for line in output.split('\n'):
+            if 'freepbx-registration' in line:
+                if 'Registered' in line:
+                    result["registered"] = True
+                    result["message"] = "Зарегистрирован"
+                elif 'Rejected' in line:
+                    result["message"] = "Отклонено (проверьте пароль)"
+                elif 'AuthSent' in line:
+                    result["message"] = "Ожидание аутентификации"
+                elif 'Unregistered' in line:
+                    result["message"] = "Не зарегистрирован"
+                else:
+                    # Парсим статус из строки
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        result["message"] = f"Статус: {parts[-1]}"
                     else:
                         result["message"] = "Статус не определен"
-                    return result
+                return result
+        
+        result["message"] = "Регистрация не найдена в Asterisk"
             
-            result["message"] = "Регистрация не найдена"
-        else:
-            # Если с -g не сработало, пробуем без -g
-            if "alwaysfork" in proc.stderr:
-                cmd2 = ["/usr/sbin/asterisk", "-rx", "pjsip show registrations"]
-                proc2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=10)
-                if proc2.returncode == 0:
-                    for line in proc2.stdout.split('\n'):
-                        if 'freepbx-registration' in line and 'Registered' in line:
-                            result["registered"] = True
-                            result["message"] = "Зарегистрирован"
-                            return result
-                result["message"] = "Не удалось получить статус"
-            else:
-                result["message"] = f"Ошибка: {proc.stderr[:50]}"
+    except subprocess.TimeoutExpired:
+        result["message"] = "Таймаут запроса к Asterisk"
     except Exception as e:
         result["message"] = f"Ошибка: {str(e)}"
     
