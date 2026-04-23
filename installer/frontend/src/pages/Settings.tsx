@@ -35,6 +35,7 @@ import {
   CloseCircleOutlined,
   SyncOutlined,
   EditOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { settingsService } from '@services/settingsService';
 import { monitoringService } from '@services/monitoringService';
@@ -197,6 +198,16 @@ const Settings: React.FC = () => {
       message.success('Конфигурация Asterisk перезагружена');
     } catch {
       message.error('Ошибка перезагрузки конфигурации');
+    }
+  };
+
+  const handleApplySettings = async () => {
+    try {
+      await settingsService.applyPBXSettings();
+      message.success('Настройки применены к Asterisk');
+      checkPBXStatus();
+    } catch {
+      message.error('Ошибка применения настроек');
     }
   };
 
@@ -381,6 +392,9 @@ const Settings: React.FC = () => {
                     </Button>
                     <Button icon={<ApiOutlined />} onClick={handleTestConnection} loading={testingConnection}>
                       Тестировать подключение
+                    </Button>
+                    <Button onClick={handleApplySettings}>
+                      Применить к Asterisk
                     </Button>
                   </Space>
                 </Form.Item>
