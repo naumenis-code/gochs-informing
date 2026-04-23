@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Pydantic schemas - ПОЛНАЯ версия со всеми импортами и обработкой ошибок"""
+"""Pydantic schemas - ПОЛНЫЙ ИМПОРТ ВСЕХ СХЕМ"""
 
 import logging
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ try:
         RefreshTokenRequest,
         LogoutResponse,
         PasswordChangeRequest,
-        PasswordResetRequest
+        PasswordResetRequest,
     )
     AUTH_SCHEMAS = [
         "Token", "TokenData", "UserCreate", "UserResponse", "LoginRequest",
@@ -46,7 +45,7 @@ try:
         User,
         UserListResponse,
         UserUpdateRequest,
-        UserRole
+        UserRole,
     )
     USER_SCHEMAS = ["User", "UserListResponse", "UserUpdateRequest", "UserRole"]
 except ImportError:
@@ -68,7 +67,7 @@ try:
         CampaignListResponse,
         CampaignStartRequest,
         CampaignStopRequest,
-        CampaignStats
+        CampaignStats,
     )
     CAMPAIGN_SCHEMAS = [
         "CampaignCreate", "CampaignUpdate", "CampaignResponse", "CampaignStatus",
@@ -94,7 +93,7 @@ try:
         ContactUpdate,
         ContactResponse,
         ContactListResponse,
-        ContactImportResponse
+        ContactImportResponse,
     )
     CONTACT_SCHEMAS = [
         "ContactCreate", "ContactUpdate", "ContactResponse",
@@ -117,7 +116,7 @@ try:
         GroupUpdate,
         GroupResponse,
         GroupListResponse,
-        GroupMembersRequest
+        GroupMembersRequest,
     )
     GROUP_SCHEMAS = [
         "GroupCreate", "GroupUpdate", "GroupResponse",
@@ -140,7 +139,7 @@ try:
         ScenarioUpdate,
         ScenarioResponse,
         ScenarioListResponse,
-        ScenarioAudioUploadResponse
+        ScenarioAudioUploadResponse,
     )
     SCENARIO_SCHEMAS = [
         "ScenarioCreate", "ScenarioUpdate", "ScenarioResponse",
@@ -162,7 +161,7 @@ try:
         InboundCallCreate,
         InboundCallResponse,
         InboundCallListResponse,
-        InboundRecordingResponse
+        InboundRecordingResponse,
     )
     INBOUND_SCHEMAS = [
         "InboundCallCreate", "InboundCallResponse",
@@ -184,7 +183,7 @@ try:
         PlaybookUpdate,
         PlaybookResponse,
         PlaybookListResponse,
-        PlaybookActivateRequest
+        PlaybookActivateRequest,
     )
     PLAYBOOK_SCHEMAS = [
         "PlaybookCreate", "PlaybookUpdate", "PlaybookResponse",
@@ -210,7 +209,6 @@ try:
         PBXStatusResponse,
         PBXTestResponse,
         PBXReloadResponse,
-        PBXRestartResponse,
         PBXApplyResponse,
         # System
         SystemSettings,
@@ -236,12 +234,11 @@ try:
         ResetSettingsResponse,
         # Enums
         TransportType,
-        LogLevel
+        LogLevel,
     )
     SETTINGS_SCHEMAS = [
         "PBXSettings", "PBXSettingsUpdate", "PBXSettingsResponse",
-        "PBXStatusResponse", "PBXTestResponse", "PBXReloadResponse",
-        "PBXRestartResponse", "PBXApplyResponse",
+        "PBXStatusResponse", "PBXTestResponse", "PBXReloadResponse", "PBXApplyResponse",
         "SystemSettings", "SystemSettingsUpdate", "SystemSettingsResponse",
         "SecuritySettings", "SecuritySettingsUpdate", "SecuritySettingsResponse",
         "NotificationSettings", "NotificationSettingsUpdate", "NotificationSettingsResponse",
@@ -257,7 +254,6 @@ except ImportError as e:
     PBXStatusResponse = None
     PBXTestResponse = None
     PBXReloadResponse = None
-    PBXRestartResponse = None
     PBXApplyResponse = None
     SystemSettings = None
     SystemSettingsUpdate = None
@@ -283,22 +279,17 @@ except ImportError as e:
 # ============================================================================
 try:
     from app.schemas.audit import (
-        # Status enum
         AuditStatus,
-        # Base schemas
         AuditLogBase,
         AuditLogCreate,
         AuditLogUpdate,
         AuditLogResponse,
-        # Stats schemas
         AuditStatsResponse,
         DailyStatsResponse,
         UserActivityResponse,
-        # Filter schemas
         AuditLogFilterParams,
         AuditLogListResponse,
-        # Response schemas
-        ClearOldLogsResponse
+        ClearOldLogsResponse,
     )
     AUDIT_SCHEMAS = [
         "AuditStatus", "AuditLogBase", "AuditLogCreate", "AuditLogUpdate",
@@ -329,7 +320,7 @@ try:
         HealthCheckResponse,
         SystemStatsResponse,
         ServiceStatusResponse,
-        MetricsResponse
+        MetricsResponse,
     )
     MONITORING_SCHEMAS = [
         "HealthCheckResponse", "SystemStatsResponse",
@@ -343,49 +334,6 @@ except ImportError:
     MONITORING_SCHEMAS = []
 
 # ============================================================================
-# TTS/STT SCHEMAS
-# ============================================================================
-try:
-    from app.schemas.tts import (
-        TTSGenerateRequest,
-        TTSGenerateResponse,
-        TTSVoice
-    )
-    TTS_SCHEMAS = ["TTSGenerateRequest", "TTSGenerateResponse", "TTSVoice"]
-except ImportError:
-    TTSGenerateRequest = None
-    TTSGenerateResponse = None
-    TTSVoice = None
-    TTS_SCHEMAS = []
-
-try:
-    from app.schemas.stt import (
-        STTTranscribeRequest,
-        STTTranscribeResponse
-    )
-    STT_SCHEMAS = ["STTTranscribeRequest", "STTTranscribeResponse"]
-except ImportError:
-    STTTranscribeRequest = None
-    STTTranscribeResponse = None
-    STT_SCHEMAS = []
-
-# ============================================================================
-# REPORT SCHEMAS
-# ============================================================================
-try:
-    from app.schemas.report import (
-        ReportGenerateRequest,
-        ReportResponse,
-        ReportType
-    )
-    REPORT_SCHEMAS = ["ReportGenerateRequest", "ReportResponse", "ReportType"]
-except ImportError:
-    ReportGenerateRequest = None
-    ReportResponse = None
-    ReportType = None
-    REPORT_SCHEMAS = []
-
-# ============================================================================
 # COMMON SCHEMAS
 # ============================================================================
 try:
@@ -395,7 +343,7 @@ try:
         SortParams,
         FilterParams,
         ErrorResponse,
-        SuccessResponse
+        SuccessResponse,
     )
     COMMON_SCHEMAS = [
         "PaginationParams", "PaginatedResponse", "SortParams",
@@ -411,12 +359,11 @@ except ImportError:
     COMMON_SCHEMAS = []
 
 # ============================================================================
-# EXPORT ALL
+# ЭКСПОРТ ВСЕХ СХЕМ
 # ============================================================================
 
-__all__: List[str] = []
+__all__ = []
 
-# Добавляем только существующие схемы
 __all__.extend(AUTH_SCHEMAS)
 __all__.extend(USER_SCHEMAS)
 __all__.extend(CAMPAIGN_SCHEMAS)
@@ -428,15 +375,15 @@ __all__.extend(PLAYBOOK_SCHEMAS)
 __all__.extend(SETTINGS_SCHEMAS)
 __all__.extend(AUDIT_SCHEMAS)
 __all__.extend(MONITORING_SCHEMAS)
-__all__.extend(TTS_SCHEMAS)
-__all__.extend(STT_SCHEMAS)
-__all__.extend(REPORT_SCHEMAS)
 __all__.extend(COMMON_SCHEMAS)
 
 # Убираем дубликаты
 __all__ = list(dict.fromkeys(__all__))
 
-# Убираем None из глобального пространства
+
+# ============================================================================
+# ОЧИСТКА None ЗНАЧЕНИЙ
+# ============================================================================
 def _cleanup_none_exports():
     """Удаляет None значения из глобального пространства"""
     import sys
