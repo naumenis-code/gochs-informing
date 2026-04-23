@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Settings endpoints - ПОЛНАЯ ВЕРСИЯ С СОХРАНЕНИЕМ В ФАЙЛЫ"""
+"""Settings endpoints - ПОЛНАЯ ИТОГОВАЯ ВЕРСИЯ С ЛОГИРОВАНИЕМ В АУДИТ"""
 
 import os
 import re
@@ -8,7 +8,7 @@ import socket
 import subprocess
 import json
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -17,12 +17,12 @@ router = APIRouter()
 
 # Пути к файлам конфигурации
 ENV_FILE = "/opt/gochs-informing/.env"
-CRED_FILE = "/root/.gochs_credentials"
+CRED_FILE = "/opt/gochs-informing/.gochs_credentials"
 ASTERISK_PJSIP_CONF = "/etc/asterisk/pjsip.conf"
 
 
 # ============================================================================
-# PYDANTIC МОДЕЛИ
+# PYDANTIC MODELS
 # ============================================================================
 
 class PBXSettingsResponse(BaseModel):
@@ -88,15 +88,8 @@ class NotificationSettingsResponse(BaseModel):
     notify_on_system_error: bool
 
 
-class AllSettingsResponse(BaseModel):
-    pbx: PBXSettingsResponse
-    system: SystemSettingsResponse
-    security: SecuritySettingsResponse
-    notifications: NotificationSettingsResponse
-
-
 # ============================================================================
-# ФУНКЦИИ РАБОТЫ С КОНФИГУРАЦИЕЙ
+# HELPER FUNCTIONS
 # ============================================================================
 
 def read_env_value(key: str, default: str = "") -> str:
@@ -123,11 +116,9 @@ def write_env_value(key: str, value: str) -> bool:
     try:
         lines = []
         found = False
-        
         if os.path.exists(ENV_FILE):
             with open(ENV_FILE, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-        
         with open(ENV_FILE, 'w', encoding='utf-8') as f:
             for line in lines:
                 if line.startswith(f"{key}="):
@@ -145,76 +136,32 @@ def write_env_value(key: str, value: str) -> bool:
 
 def read_credentials() -> Dict[str, Any]:
     """Чтение всех учетных данных из credentials файла"""
-    result = {
-        "freepbx": {"host": "", "port": 5060, "extension": "", "password": ""},
-        "postgresql": {"password": "", "database": "gochs", "user": "gochs_user"},
-        "redis": {"password": ""},
-        "asterisk": {"ami_user": "", "ami_password": "", "ari_password": ""}
-    }
-    
+    result = {"host": "", "port": 5060, "extension": "", "password": ""}
     try:
         if os.path.exists(CRED_FILE):
             with open(CRED_FILE, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # FreePBX
-            freepbx_section = re.search(r'FREE PBX:(.*?)(?:РЕЖИМ SSL:|$)', content, re.DOTALL)
-            if freepbx_section:
-                section = freepbx_section.group(1)
+            section = re.search(r'FREE PBX:(.*?)(?:РЕЖИМ SSL:|$)', content, re.DOTALL)
+            if section:
+                s = section.group(1)
                 
-                host_match = re.search(r'Хост:\s*([^\s\n]+)', section)
+                host_match = re.search(r'Хост:\s*([^\s\n]+)', s)
                 if host_match:
                     hp = host_match.group(1)
                     if ':' in hp:
-                        result["freepbx"]["host"], port = hp.split(':', 1)
-                        result["freepbx"]["port"] = int(port)
+                        result["host"], port = hp.split(':', 1)
+                        result["port"] = int(port)
                     else:
-                        result["freepbx"]["host"] = hp
+                        result["host"] = hp
                 
-                ext_match = re.search(r'Extension:\s*(\S+)', section)
+                ext_match = re.search(r'Extension:\s*(\S+)', s)
                 if ext_match:
-                    result["freepbx"]["extension"] = ext_match.group(1)
+                    result["extension"] = ext_match.group(1)
                 
-                pass_match = re.search(r'Пароль:\s*(\S+)', section)
+                pass_match = re.search(r'Пароль:\s*(\S+)', s)
                 if pass_match:
-                    result["freepbx"]["password"] = pass_match.group(1)
-            
-            # PostgreSQL
-            pg_section = re.search(r'БАЗА ДАННЫХ POSTGRESQL:(.*?)(?:REDIS:|$)', content, re.DOTALL)
-            if pg_section:
-                section = pg_section.group(1)
-                pass_match = re.search(r'Пароль:\s*(\S+)', section)
-                if pass_match:
-                    result["postgresql"]["password"] = pass_match.group(1)
-                db_match = re.search(r'База данных:\s*(\S+)', section)
-                if db_match:
-                    result["postgresql"]["database"] = db_match.group(1)
-                user_match = re.search(r'Пользователь:\s*(\S+)', section)
-                if user_match:
-                    result["postgresql"]["user"] = user_match.group(1)
-            
-            # Redis
-            redis_section = re.search(r'REDIS:(.*?)(?:ASTERISK:|$)', content, re.DOTALL)
-            if redis_section:
-                section = redis_section.group(1)
-                pass_match = re.search(r'Пароль:\s*(\S+)', section)
-                if pass_match:
-                    result["redis"]["password"] = pass_match.group(1)
-            
-            # Asterisk
-            asterisk_section = re.search(r'ASTERISK:(.*?)(?:FREE PBX:|$)', content, re.DOTALL)
-            if asterisk_section:
-                section = asterisk_section.group(1)
-                ami_user = re.search(r'AMI пользователь:\s*(\S+)', section)
-                if ami_user:
-                    result["asterisk"]["ami_user"] = ami_user.group(1)
-                ami_pass = re.search(r'AMI пароль:\s*(\S+)', section)
-                if ami_pass:
-                    result["asterisk"]["ami_password"] = ami_pass.group(1)
-                ari_pass = re.search(r'ARI пароль:\s*(\S+)', section)
-                if ari_pass:
-                    result["asterisk"]["ari_password"] = ari_pass.group(1)
-                    
+                    result["password"] = pass_match.group(1)
     except Exception as e:
         logger.error(f"Error reading credentials: {e}")
     
@@ -223,6 +170,7 @@ def read_credentials() -> Dict[str, Any]:
 
 def get_freepbx_config() -> Dict[str, Any]:
     """Получение полной конфигурации FreePBX"""
+    # Базовые значения по умолчанию
     config = {
         "host": "192.168.1.10",
         "port": 5060,
@@ -235,18 +183,18 @@ def get_freepbx_config() -> Dict[str, Any]:
         "register_enabled": True
     }
     
-    # Сначала читаем из credentials (это основной источник)
+    # Читаем из credentials (основной источник)
     creds = read_credentials()
-    if creds["freepbx"]["host"]:
-        config["host"] = creds["freepbx"]["host"]
-        config["port"] = creds["freepbx"]["port"]
-    if creds["freepbx"]["extension"]:
-        config["extension"] = creds["freepbx"]["extension"]
-        config["username"] = creds["freepbx"]["extension"]
-    if creds["freepbx"]["password"]:
-        config["password"] = creds["freepbx"]["password"]
+    if creds["host"]:
+        config["host"] = creds["host"]
+        config["port"] = creds["port"]
+    if creds["extension"]:
+        config["extension"] = creds["extension"]
+        config["username"] = creds["extension"]
+    if creds["password"]:
+        config["password"] = creds["password"]
     
-    # Затем ПЕРЕОПРЕДЕЛЯЕМ из .env (приоритет выше)
+    # Переопределяем из .env (приоритет выше)
     env_host = read_env_value("FREEPBX_HOST", "")
     if env_host:
         if ':' in env_host:
@@ -287,11 +235,69 @@ def get_freepbx_config() -> Dict[str, Any]:
     return config
 
 
+async def log_audit_event(action: str, details: Optional[Dict] = None, status: str = "success"):
+    """Логирование изменений в аудит"""
+    try:
+        from app.api.v1.endpoints.audit import log_event
+        from app.core.database import get_db
+        async for db in get_db():
+            await log_event(
+                db=db,
+                user_name="system",
+                action=action,
+                entity_type="settings",
+                details=details,
+                status=status
+            )
+            break
+    except Exception as e:
+        logger.error(f"Failed to log audit: {e}")
+
+
+def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Проверка статуса исходящей регистрации на FreePBX"""
+    result = {
+        "registered": False,
+        "message": "",
+        "host": config["host"],
+        "port": config["port"],
+        "extension": config["extension"]
+    }
+    
+    try:
+        cmd = "sudo /usr/sbin/asterisk -rx 'pjsip show registrations' 2>&1"
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        output = proc.stdout + proc.stderr
+        
+        for line in output.split('\n'):
+            if 'freepbx-registration' in line:
+                if 'Registered' in line:
+                    result["registered"] = True
+                    result["message"] = "Зарегистрирован"
+                elif 'Rejected' in line:
+                    result["message"] = "Отклонено (проверьте пароль)"
+                elif 'AuthSent' in line:
+                    result["message"] = "Ожидание аутентификации"
+                elif 'Unregistered' in line:
+                    result["message"] = "Не зарегистрирован"
+                else:
+                    result["message"] = "Статус не определен"
+                return result
+        
+        result["message"] = "Регистрация не найдена в Asterisk"
+            
+    except subprocess.TimeoutExpired:
+        result["message"] = "Таймаут запроса к Asterisk"
+    except Exception as e:
+        result["message"] = f"Ошибка: {str(e)}"
+    
+    return result
+
+
 def update_asterisk_pjsip_config(config: Dict[str, Any]) -> bool:
     """Обновление конфигурации PJSIP в Asterisk"""
     try:
         if not os.path.exists(ASTERISK_PJSIP_CONF):
-            logger.warning(f"PJSIP config not found: {ASTERISK_PJSIP_CONF}")
             return False
         
         with open(ASTERISK_PJSIP_CONF, 'r') as f:
@@ -361,95 +367,15 @@ match = {config['host']}
         return False
 
 
-def reload_asterisk_pjsip() -> Dict[str, Any]:
-    """Перезагрузка PJSIP в Asterisk"""
-    result = {"success": False, "message": ""}
-    
-    try:
-        cmd = ["sudo", "asterisk", "-rx", "pjsip reload"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        
-        if proc.returncode == 0:
-            result["success"] = True
-            result["message"] = "PJSIP reloaded successfully"
-            return result
-        
-        # ... остальные попытки
-    except Exception as e:
-        result["message"] = f"Reload error: {str(e)}"
-    
-    return result
-
-
-def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Проверка статуса исходящей регистрации на FreePBX"""
-    result = {
-        "registered": False,
-        "message": "",
-        "host": config["host"],
-        "port": config["port"],
-        "extension": config["extension"]
-    }
-    
-    import subprocess
-    
-    try:
-        # ВАЖНО: Добавлен sudo перед командой!
-        cmd = "sudo /usr/sbin/asterisk -rx 'pjsip show registrations' 2>&1"
-        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-        
-        # Объединяем stdout и stderr (там может быть полезная информация)
-        output = proc.stdout + proc.stderr
-        
-        # Ищем freepbx-registration и статус Registered
-        for line in output.split('\n'):
-            if 'freepbx-registration' in line:
-                if 'Registered' in line:
-                    result["registered"] = True
-                    result["message"] = "Зарегистрирован"
-                elif 'Rejected' in line:
-                    result["message"] = "Отклонено (проверьте пароль)"
-                elif 'AuthSent' in line:
-                    result["message"] = "Ожидание аутентификации"
-                elif 'Unregistered' in line:
-                    result["message"] = "Не зарегистрирован"
-                else:
-                    # Парсим статус из строки
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        result["message"] = f"Статус: {parts[-1]}"
-                    else:
-                        result["message"] = "Статус не определен"
-                return result
-        
-        result["message"] = "Регистрация не найдена в Asterisk"
-            
-    except subprocess.TimeoutExpired:
-        result["message"] = "Таймаут запроса к Asterisk"
-    except Exception as e:
-        result["message"] = f"Ошибка: {str(e)}"
-    
-    return result
-
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
-
-@router.get("/all", response_model=AllSettingsResponse)
-async def get_all_settings():
-    """Получение всех настроек одним запросом"""
-    return {
-        "pbx": await get_pbx_settings(),
-        "system": await get_system_settings(),
-        "security": await get_security_settings(),
-        "notifications": await get_notification_settings()
-    }
-
 
 @router.get("/pbx", response_model=PBXSettingsResponse)
 async def get_pbx_settings():
     """Получение настроек FreePBX"""
     config = get_freepbx_config()
+    await log_audit_event("view", {"section": "pbx"})
     return {
         "host": config["host"],
         "port": config["port"],
@@ -465,9 +391,10 @@ async def get_pbx_settings():
 
 @router.put("/pbx", response_model=PBXSettingsResponse)
 async def update_pbx_settings(data: Dict[str, Any]):
-    """Обновление настроек FreePBX"""
+    """Обновление настроек FreePBX с сохранением и логированием"""
     logger.info("Updating PBX settings")
     
+    # Сохраняем в .env
     if "host" in data:
         host = data["host"]
         port = data.get("port", 5060)
@@ -493,7 +420,38 @@ async def update_pbx_settings(data: Dict[str, Any]):
         write_env_value("FREEPBX_ENABLED", str(data["register_enabled"]).lower())
     
     if "codecs" in data:
-        write_env_value("FREEPBX_CODECS", ','.join(data["codecs"]))
+        write_env_value("FREEPBX_CODECS", ','.join(data["codecs"]) if isinstance(data["codecs"], list) else str(data["codecs"]))
+    
+    # Обновляем credentials файл
+    try:
+        if os.path.exists(CRED_FILE):
+            with open(CRED_FILE, 'r', encoding='utf-8') as f:
+                cred_content = f.read()
+            
+            host_val = data.get("host", "192.168.1.10")
+            port_val = data.get("port", 5060)
+            ext_val = data.get("extension", "gochs")
+            pass_val = data.get("password") or read_env_value("FREEPBX_PASSWORD", "")
+            
+            new_freepbx = f"""FREE PBX:
+  Хост: {host_val}:{port_val}
+  Extension: {ext_val}
+  Пароль: {pass_val}
+"""
+            
+            pattern = r'FREE PBX:.*?(?=РЕЖИМ SSL:|$)'
+            cred_content = re.sub(pattern, new_freepbx, cred_content, flags=re.DOTALL)
+            
+            with open(CRED_FILE, 'w', encoding='utf-8') as f:
+                f.write(cred_content)
+            
+            logger.info("Credentials file updated")
+    except Exception as e:
+        logger.error(f"Failed to update credentials: {e}")
+    
+    # Логируем в аудит
+    changes = {k: v for k, v in data.items() if v is not None}
+    await log_audit_event("update_settings", {"section": "pbx", "changes": changes})
     
     return await get_pbx_settings()
 
@@ -502,15 +460,16 @@ async def update_pbx_settings(data: Dict[str, Any]):
 async def apply_pbx_settings(background_tasks: BackgroundTasks):
     """Применение настроек FreePBX к Asterisk"""
     config = get_freepbx_config()
-    
     config_updated = update_asterisk_pjsip_config(config)
     
     def reload_task():
-        reload_asterisk_pjsip()
+        subprocess.run(["sudo", "/usr/sbin/asterisk", "-rx", "pjsip reload"], 
+                      capture_output=True, timeout=10)
     
     background_tasks.add_task(reload_task)
     
     status = check_registration_status(config)
+    await log_audit_event("apply_settings", {"section": "pbx", "config_updated": config_updated})
     
     return {
         "message": "Настройки применены" if config_updated else "Ошибка применения",
@@ -544,7 +503,7 @@ async def test_pbx_connection(data: Dict[str, Any]):
         if result == 0:
             return {"success": True, "message": f"Подключение к {host}:{port} успешно"}
         else:
-            return {"success": False, "message": f"Не удалось подключиться", "error": "Connection refused"}
+            return {"success": False, "message": "Не удалось подключиться", "error": "Connection refused"}
     except Exception as e:
         return {"success": False, "message": "Ошибка подключения", "error": str(e)}
 
@@ -552,8 +511,17 @@ async def test_pbx_connection(data: Dict[str, Any]):
 @router.post("/pbx/reload", response_model=PBXReloadResponse)
 async def reload_pbx_config():
     """Принудительная перезагрузка PJSIP"""
-    result = reload_asterisk_pjsip()
-    return {"message": result["message"], "success": result["success"]}
+    try:
+        cmd = ["sudo", "/usr/sbin/asterisk", "-rx", "pjsip reload"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        if proc.returncode == 0:
+            await log_audit_event("reload", {"section": "pbx", "success": True})
+            return {"message": "PJSIP reloaded successfully", "success": True}
+        else:
+            return {"message": f"Reload failed: {proc.stderr}", "success": False}
+    except Exception as e:
+        return {"message": f"Error: {str(e)}", "success": False}
 
 
 @router.get("/system", response_model=SystemSettingsResponse)
@@ -572,7 +540,7 @@ async def get_system_settings():
 
 @router.put("/system", response_model=SystemSettingsResponse)
 async def update_system_settings(data: Dict[str, Any]):
-    """Обновление системных настроек"""
+    """Обновление системных настроек с логированием"""
     logger.info("Updating system settings")
     
     mapping = {
@@ -592,6 +560,7 @@ async def update_system_settings(data: Dict[str, Any]):
                 value = str(value).lower()
             write_env_value(env_key, str(value))
     
+    await log_audit_event("update_settings", {"section": "system"})
     return await get_system_settings()
 
 
@@ -611,7 +580,7 @@ async def get_security_settings():
 
 @router.put("/security", response_model=SecuritySettingsResponse)
 async def update_security_settings(data: Dict[str, Any]):
-    """Обновление настроек безопасности"""
+    """Обновление настроек безопасности с логированием"""
     logger.info("Updating security settings")
     
     mapping = {
@@ -631,6 +600,7 @@ async def update_security_settings(data: Dict[str, Any]):
                 value = str(value).lower()
             write_env_value(env_key, str(value))
     
+    await log_audit_event("update_settings", {"section": "security"})
     return await get_security_settings()
 
 
@@ -652,7 +622,7 @@ async def get_notification_settings():
 
 @router.put("/notifications", response_model=NotificationSettingsResponse)
 async def update_notification_settings(data: Dict[str, Any]):
-    """Обновление настроек уведомлений"""
+    """Обновление настроек уведомлений с логированием"""
     logger.info("Updating notification settings")
     
     mapping = {
@@ -676,6 +646,7 @@ async def update_notification_settings(data: Dict[str, Any]):
                 continue
             write_env_value(env_key, str(value))
     
+    await log_audit_event("update_settings", {"section": "notifications"})
     return await get_notification_settings()
 
 
@@ -686,23 +657,10 @@ async def get_credentials_info():
     
     return {
         "freepbx": {
-            "host": creds["freepbx"]["host"],
-            "port": creds["freepbx"]["port"],
-            "extension": creds["freepbx"]["extension"],
-            "has_password": bool(creds["freepbx"]["password"])
-        },
-        "postgresql": {
-            "database": creds["postgresql"]["database"],
-            "user": creds["postgresql"]["user"],
-            "has_password": bool(creds["postgresql"]["password"])
-        },
-        "redis": {
-            "has_password": bool(creds["redis"]["password"])
-        },
-        "asterisk": {
-            "ami_user": creds["asterisk"]["ami_user"],
-            "has_ami_password": bool(creds["asterisk"]["ami_password"]),
-            "has_ari_password": bool(creds["asterisk"]["ari_password"])
+            "host": creds["host"],
+            "port": int(creds["port"]) if creds["port"] else 5060,
+            "extension": creds["extension"],
+            "has_password": bool(creds["password"])
         }
     }
 
@@ -727,6 +685,7 @@ async def create_backup(background_tasks: BackgroundTasks):
         logger.info(f"Settings backup created: {backup_file}")
     
     background_tasks.add_task(do_backup)
+    await log_audit_event("backup", {"file": backup_file})
     
     return {
         "message": "Backup started",
@@ -791,4 +750,5 @@ async def reset_settings():
         write_env_value(key, value)
     
     logger.info("Settings reset to defaults")
+    await log_audit_event("reset_settings")
     return {"message": "Settings reset to defaults", "success": True}
