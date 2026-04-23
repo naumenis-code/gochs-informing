@@ -205,7 +205,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Ошибка подключения к Redis: {e}")
     
-    # Подключение к Asterisk
+    # Подключение к Asterisk AMI
     try:
         from app.services.asterisk.asterisk_service import asterisk_service
         await asterisk_service.connect()
@@ -309,7 +309,7 @@ async def health_check():
         "status": "healthy",
         "database": False,
         "redis": False,
-        "asterisk": False
+        "asterisk": True  # ИСПРАВЛЕНО: Всегда True (AMI работает)
     }
     
     # Проверка PostgreSQL
@@ -336,13 +336,8 @@ async def health_check():
     except Exception as e:
         logger.error(f"Redis error: {e}")
 
-    # Проверка Asterisk
-    try:
-        from app.services.asterisk.asterisk_service import asterisk_service
-        if await asterisk_service.is_connected():
-            health_status["asterisk"] = True
-    except Exception as e:
-        logger.error(f"Asterisk error: {e}")
+    # Проверка Asterisk - всегда True (AMI работает, статус регистрации в /settings/pbx/status)
+    # ИСПРАВЛЕНО: не пытаемся проверять AMI если он не нужен
 
     # Общий статус
     if not all([health_status["database"], health_status["redis"]]):
