@@ -224,9 +224,9 @@ def read_credentials() -> Dict[str, Any]:
 def get_freepbx_config() -> Dict[str, Any]:
     """Получение полной конфигурации FreePBX"""
     config = {
-        "host": "192.168.1.10",  # Универсальное значение
+        "host": "192.168.1.10",
         "port": 5060,
-        "extension": "gochs",     # Универсальное значение
+        "extension": "gochs",
         "username": "gochs",
         "password": "",
         "transport": "udp",
@@ -235,7 +235,18 @@ def get_freepbx_config() -> Dict[str, Any]:
         "register_enabled": True
     }
     
-    # Сначала пробуем из .env
+    # Сначала читаем из credentials (это основной источник)
+    creds = read_credentials()
+    if creds["freepbx"]["host"]:
+        config["host"] = creds["freepbx"]["host"]
+        config["port"] = creds["freepbx"]["port"]
+    if creds["freepbx"]["extension"]:
+        config["extension"] = creds["freepbx"]["extension"]
+        config["username"] = creds["freepbx"]["extension"]
+    if creds["freepbx"]["password"]:
+        config["password"] = creds["freepbx"]["password"]
+    
+    # Затем ПЕРЕОПРЕДЕЛЯЕМ из .env (приоритет выше)
     env_host = read_env_value("FREEPBX_HOST", "")
     if env_host:
         if ':' in env_host:
@@ -272,18 +283,6 @@ def get_freepbx_config() -> Dict[str, Any]:
     env_codecs = read_env_value("FREEPBX_CODECS", "")
     if env_codecs:
         config["codecs"] = env_codecs.split(',')
-    
-    # Если настройки пустые - читаем из credentials
-    if not config["host"] or config["host"] == "192.168.0.6":
-        creds = read_credentials()
-        if creds["freepbx"]["host"]:
-            config["host"] = creds["freepbx"]["host"]
-            config["port"] = creds["freepbx"]["port"]
-        if creds["freepbx"]["extension"]:
-            config["extension"] = creds["freepbx"]["extension"]
-            config["username"] = creds["freepbx"]["extension"]
-        if creds["freepbx"]["password"]:
-            config["password"] = creds["freepbx"]["password"]
     
     return config
 
