@@ -3,7 +3,7 @@
 ################################################################################
 # Модуль: 09-web-audit-settings.sh
 # Назначение: Установка страниц Аудита и Настроек с полной интеграцией
-# Версия: 2.0.2 (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ - ГАРАНТИРОВАННОЕ ПОДКЛЮЧЕНИЕ АУДИТА)
+# Версия: 2.0.3 (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ - С ПРАВАМИ ASTERISK)
 ################################################################################
 
 # Определение путей
@@ -122,19 +122,22 @@ install() {
     # 7. Проверка и исправление прав в базе данных
     fix_database_permissions
     
-    # 8. Исправление импортов иконок в Settings.tsx
+    # 8. Настройка прав Asterisk для API
+    fix_asterisk_permissions
+    
+    # 9. Исправление импортов иконок в Settings.tsx
     fix_settings_imports
     
-    # 9. Обновление импортов в frontend
+    # 10. Обновление импортов в frontend
     update_frontend_imports
     
-    # 10. Пересборка фронтенда
+    # 11. Пересборка фронтенда
     rebuild_frontend
     
-    # 11. Перезапуск сервисов
+    # 12. Перезапуск сервисов
     restart_services
     
-    # 12. Проверка, что аудит действительно подключен
+    # 13. Проверка, что аудит действительно подключен
     verify_audit_connected
     
     mark_module_installed "$MODULE_NAME"
@@ -659,6 +662,52 @@ fix_database_permissions() {
 }
 
 # ============================================================================
+# НАСТРОЙКА ПРАВ ASTERISK ДЛЯ API
+# ============================================================================
+
+fix_asterisk_permissions() {
+    log_info "Настройка прав Asterisk для API..."
+    
+    # Добавляем пользователя gochs в группу asterisk
+    if id -nG "$GOCHS_USER" 2>/dev/null | grep -qw "asterisk"; then
+        log_info "  ✓ Пользователь $GOCHS_USER уже в группе asterisk"
+    else
+        usermod -aG asterisk "$GOCHS_USER" 2>/dev/null && \
+            log_info "  ✓ Пользователь $GOCHS_USER добавлен в группу asterisk" || \
+            log_warn "  ⚠ Не удалось добавить пользователя в группу asterisk"
+    fi
+    
+    # Настраиваем права на сокет Asterisk
+    if [[ -e /var/run/asterisk/asterisk.ctl ]]; then
+        chown asterisk:asterisk /var/run/asterisk/asterisk.ctl 2>/dev/null
+        chmod 660 /var/run/asterisk/asterisk.ctl 2>/dev/null
+        log_info "  ✓ Права на asterisk.ctl настроены"
+    fi
+    
+    if [[ -d /var/run/asterisk ]]; then
+        chmod 770 /var/run/asterisk/ 2>/dev/null
+        log_info "  ✓ Права на /var/run/asterisk настроены"
+    fi
+    
+    # Добавляем sudo права для надежности
+    if [[ ! -f /etc/sudoers.d/gochs-asterisk ]]; then
+        echo "$GOCHS_USER ALL=(ALL) NOPASSWD: /usr/sbin/asterisk" > /etc/sudoers.d/gochs-asterisk
+        chmod 440 /etc/sudoers.d/gochs-asterisk
+        log_info "  ✓ Sudo права для asterisk добавлены"
+    fi
+    
+    # Исправляем команду в settings.py на использование sudo
+    local settings_file="$TARGET_APP/api/v1/endpoints/settings.py"
+    if [[ -f "$settings_file" ]]; then
+        # Заменяем /usr/sbin/asterisk на sudo /usr/sbin/asterisk
+        sed -i 's|/usr/sbin/asterisk|sudo /usr/sbin/asterisk|g' "$settings_file"
+        log_info "  ✓ Команда asterisk в settings.py исправлена на sudo"
+    fi
+    
+    log_info "✓ Права Asterisk настроены"
+}
+
+# ============================================================================
 # ОБНОВЛЕНИЕ ИМПОРТОВ В FRONTEND
 # ============================================================================
 
@@ -857,46 +906,6 @@ check_status() {
     return $status
 }
 
-
-# ============================================================================
-# НАСТРОЙКА ПРАВ ASTERISK ДЛЯ API
-# ============================================================================
-
-fix_asterisk_permissions() {
-    log_info "Настройка прав Asterisk для API..."
-    
-    # Добавляем пользователя gochs в группу asterisk
-    if id -nG "$GOCHS_USER" 2>/dev/null | grep -qw "asterisk"; then
-        log_info "  ✓ Пользователь $GOCHS_USER уже в группе asterisk"
-    else
-        usermod -aG asterisk "$GOCHS_USER" 2>/dev/null && \
-            log_info "  ✓ Пользователь $GOCHS_USER добавлен в группу asterisk" || \
-            log_warn "  ⚠ Не удалось добавить пользователя в группу asterisk"
-    fi
-    
-    # Настраиваем права на сокет Asterisk
-    if [[ -e /var/run/asterisk/asterisk.ctl ]]; then
-        chown asterisk:asterisk /var/run/asterisk/asterisk.ctl 2>/dev/null
-        chmod 660 /var/run/asterisk/asterisk.ctl 2>/dev/null
-        log_info "  ✓ Права на asterisk.ctl настроены"
-    fi
-    
-    if [[ -d /var/run/asterisk ]]; then
-        chmod 770 /var/run/asterisk/ 2>/dev/null
-        log_info "  ✓ Права на /var/run/asterisk настроены"
-    fi
-    
-    # Добавляем sudo права для надежности
-    if [[ ! -f /etc/sudoers.d/gochs-asterisk ]]; then
-        echo "$GOCHS_USER ALL=(ALL) NOPASSWD: /usr/sbin/asterisk" > /etc/sudoers.d/gochs-asterisk
-        chmod 440 /etc/sudoers.d/gochs-asterisk
-        log_info "  ✓ Sudo права для asterisk добавлены"
-    fi
-    
-    log_info "✓ Права Asterisk настроены"
-}
-
-
 # ============================================================================
 # ОБРАБОТКА АРГУМЕНТОВ
 # ============================================================================
@@ -917,17 +926,21 @@ case "${1:-}" in
     fix-permissions)
         fix_database_permissions
         ;;
+    fix-asterisk)
+        fix_asterisk_permissions
+        ;;
     verify-audit)
         verify_audit_connected
         ;;
     *)
-        echo "Использование: $0 {install|uninstall|status|rebuild|fix-permissions|verify-audit}"
+        echo "Использование: $0 {install|uninstall|status|rebuild|fix-permissions|fix-asterisk|verify-audit}"
         echo ""
         echo "  install         - Установка страниц Аудита и Настроек"
         echo "  uninstall       - Удаление страниц"
         echo "  status          - Проверка статуса установки"
         echo "  rebuild         - Пересборка фронтенда"
         echo "  fix-permissions - Исправление прав в базе данных"
+        echo "  fix-asterisk    - Настройка прав Asterisk для API"
         echo "  verify-audit    - Проверка подключения аудита"
         exit 1
         ;;
