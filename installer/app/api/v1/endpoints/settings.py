@@ -392,7 +392,7 @@ def reload_asterisk_pjsip() -> Dict[str, Any]:
 
 
 def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Проверка статуса регистрации в Asterisk"""
+    """Проверка реального статуса регистрации в Asterisk"""
     result = {
         "registered": False,
         "message": "",
@@ -402,17 +402,51 @@ def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
     }
     
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3)
-        connect_result = sock.connect_ex((config["host"], config["port"]))
-        sock.close()
+        # Проверяем через asterisk CLI
+        import subprocess
+        cmd = ["asterisk", "-rx", "pjsip show registrations"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         
-        if connect_result == 0:
-            result["registered"] = True
-            result["message"] = "Порт доступен"
-        else:
-            result["message"] = "Порт недоступен"
+        if proc.returncode == 0:
+            output = proc.stdout
             
+            # Ищем нашу регистрацию по extension или хосту
+            extension = config["extension"]
+            host = config["host"]
+            
+            # Парсим вывод pjsip show registrations
+            # Пример вывода:
+            # freepbx-registration: freepbx-auth  sip:192.168.0.6:5060  Registered
+            for line in output.split('\n'):
+                if extension in line or host in line:
+                    if 'Registered' in line:
+                        result["registered"] = True
+                        result["message"] = "Зарегистрирован"
+                        return result
+                    elif 'Rejected' in line:
+                        result["registered"] = False
+                        result["message"] = "Отклонено (проверьте пароль)"
+                        return result
+                    elif 'AuthSent' in line:
+                        result["registered"] = False
+                        result["message"] = "Ожидание аутентификации"
+                        return result
+                    elif 'Unregistered' in line:
+                        result["registered"] = False
+                        result["message"] = "Не зарегистрирован"
+                        return result
+            
+            # Если не нашли
+            result["registered"] = False
+            result["message"] = "Регистрация не найдена"
+        else:
+            result["message"] = f"Ошибка выполнения команды: {proc.stderr}"
+            
+    except subprocess.TimeoutExpired:
+        result["message"] = "Таймаут выполнения команды"
+    except FileNotFoundError:
+        # Asterisk CLI не найден
+        result["message"] = "Asterisk CLI не доступен"
     except Exception as e:
         result["message"] = f"Ошибка проверки: {str(e)}"
     
