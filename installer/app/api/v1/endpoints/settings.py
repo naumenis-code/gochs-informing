@@ -255,7 +255,7 @@ async def log_audit_event(action: str, details: Optional[Dict] = None, status: s
 
 
 def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Проверка статуса регистрации на FreePBX через TCP подключение"""
+    """Проверка статуса исходящей регистрации на FreePBX"""
     result = {
         "registered": False,
         "message": "",
@@ -264,28 +264,32 @@ def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
         "extension": config["extension"]
     }
     
-    import socket
-    
     try:
-        # Создаем TCP сокет
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3)
-        # Пробуем подключиться к порту SIP
-        rc = sock.connect_ex((config["host"], config["port"]))
-        sock.close()
+        cmd = "sudo /usr/sbin/asterisk -rx 'pjsip show registrations' 2>&1"
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        output = proc.stdout + proc.stderr
         
-        if rc == 0:
-            result["registered"] = True
-            result["message"] = f"Подключен к {config['host']}:{config['port']}"
-        else:
-            result["message"] = f"Порт {config['port']} недоступен"
+        for line in output.split('\n'):
+            if 'freepbx-registration' in line:
+                if 'Registered' in line:
+                    result["registered"] = True
+                    result["message"] = "Зарегистрирован"
+                elif 'Rejected' in line:
+                    result["message"] = "Отклонено (проверьте пароль)"
+                elif 'AuthSent' in line:
+                    result["message"] = "Ожидание аутентификации"
+                elif 'Unregistered' in line:
+                    result["message"] = "Не зарегистрирован"
+                else:
+                    result["message"] = "Статус не определен"
+                return result
+        
+        result["message"] = "Регистрация не найдена в Asterisk"
             
-    except socket.gaierror:
-        result["message"] = f"Не удалось разрешить хост: {config['host']}"
-    except socket.timeout:
-        result["message"] = "Таймаут подключения"
+    except subprocess.TimeoutExpired:
+        result["message"] = "Таймаут запроса к Asterisk"
     except Exception as e:
-        result["message"] = f"Ошибка: {str(e)[:50]}"
+        result["message"] = f"Ошибка: {str(e)}"
     
     return result
 
