@@ -404,8 +404,8 @@ def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
     import subprocess
     
     try:
-        # Используем shell=True для обхода проблем с alwaysfork
-        cmd = "/usr/sbin/asterisk -rx 'pjsip show registrations' 2>&1"
+        # ВАЖНО: Добавлен sudo перед командой!
+        cmd = "sudo /usr/sbin/asterisk -rx 'pjsip show registrations' 2>&1"
         proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
         
         # Объединяем stdout и stderr (там может быть полезная информация)
