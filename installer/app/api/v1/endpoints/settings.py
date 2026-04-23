@@ -401,20 +401,46 @@ def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
         "extension": config["extension"]
     }
     
+    # Пути к asterisk (пробуем все варианты)
+    asterisk_paths = [
+        "/usr/sbin/asterisk",
+        "/usr/bin/asterisk",
+        "/sbin/asterisk",
+        "/bin/asterisk",
+        "asterisk"  # через PATH
+    ]
+    
+    import subprocess
+    import os
+    
+    asterisk_cmd = None
+    for path in asterisk_paths:
+        try:
+            # Проверяем существует ли файл или команда в PATH
+            if os.path.exists(path) or path == "asterisk":
+                test_cmd = [path, "-V"]
+                test_proc = subprocess.run(test_cmd, capture_output=True, timeout=2)
+                if test_proc.returncode == 0:
+                    asterisk_cmd = path
+                    break
+        except:
+            continue
+    
+    if not asterisk_cmd:
+        result["message"] = "Asterisk CLI не найден"
+        return result
+    
     try:
-        import subprocess
-        
-        # Проверяем ИСХОДЯЩУЮ регистрацию через pjsip show registrations
-        cmd = ["asterisk", "-rx", "pjsip show registrations"]
+        # Проверяем ИСХОДЯЩУЮ регистрацию
+        cmd = [asterisk_cmd, "-rx", "pjsip show registrations"]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         
         if proc.returncode == 0:
             output = proc.stdout
             
-            # Ищем freepbx-registration или строку с нашим хостом
+            # Ищем freepbx-registration
             for line in output.split('\n'):
-                # Ищем строку регистрации
-                if 'freepbx' in line.lower() or config["host"] in line:
+                if 'freepbx-registration' in line or config["host"] in line:
                     if 'Registered' in line:
                         result["registered"] = True
                         result["message"] = "Зарегистрирован на FreePBX"
@@ -427,22 +453,19 @@ def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
                         result["registered"] = False
                         result["message"] = "Ожидание аутентификации..."
                         return result
-                    elif 'Unregistered' in line:
-                        result["registered"] = False
-                        result["message"] = "Не зарегистрирован"
-                        return result
             
-            # Если не нашли freepbx - значит регистрация не настроена
-            result["message"] = "Регистрация на FreePBX не найдена в конфигурации"
+            # Если не нашли
+            if 'freepbx-registration' not in output:
+                result["message"] = "Регистрация не настроена в Asterisk"
+            else:
+                result["message"] = "Регистрация не активна"
         else:
-            result["message"] = f"Ошибка Asterisk: {proc.stderr}"
+            result["message"] = f"Ошибка выполнения: {proc.stderr[:100]}"
             
     except subprocess.TimeoutExpired:
         result["message"] = "Таймаут запроса к Asterisk"
-    except FileNotFoundError:
-        result["message"] = "Asterisk CLI недоступен"
     except Exception as e:
-        result["message"] = f"Ошибка: {str(e)}"
+        result["message"] = f"Ошибка: {str(e)[:100]}"
     
     return result
 
