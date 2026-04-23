@@ -857,6 +857,46 @@ check_status() {
     return $status
 }
 
+
+# ============================================================================
+# НАСТРОЙКА ПРАВ ASTERISK ДЛЯ API
+# ============================================================================
+
+fix_asterisk_permissions() {
+    log_info "Настройка прав Asterisk для API..."
+    
+    # Добавляем пользователя gochs в группу asterisk
+    if id -nG "$GOCHS_USER" 2>/dev/null | grep -qw "asterisk"; then
+        log_info "  ✓ Пользователь $GOCHS_USER уже в группе asterisk"
+    else
+        usermod -aG asterisk "$GOCHS_USER" 2>/dev/null && \
+            log_info "  ✓ Пользователь $GOCHS_USER добавлен в группу asterisk" || \
+            log_warn "  ⚠ Не удалось добавить пользователя в группу asterisk"
+    fi
+    
+    # Настраиваем права на сокет Asterisk
+    if [[ -e /var/run/asterisk/asterisk.ctl ]]; then
+        chown asterisk:asterisk /var/run/asterisk/asterisk.ctl 2>/dev/null
+        chmod 660 /var/run/asterisk/asterisk.ctl 2>/dev/null
+        log_info "  ✓ Права на asterisk.ctl настроены"
+    fi
+    
+    if [[ -d /var/run/asterisk ]]; then
+        chmod 770 /var/run/asterisk/ 2>/dev/null
+        log_info "  ✓ Права на /var/run/asterisk настроены"
+    fi
+    
+    # Добавляем sudo права для надежности
+    if [[ ! -f /etc/sudoers.d/gochs-asterisk ]]; then
+        echo "$GOCHS_USER ALL=(ALL) NOPASSWD: /usr/sbin/asterisk" > /etc/sudoers.d/gochs-asterisk
+        chmod 440 /etc/sudoers.d/gochs-asterisk
+        log_info "  ✓ Sudo права для asterisk добавлены"
+    fi
+    
+    log_info "✓ Права Asterisk настроены"
+}
+
+
 # ============================================================================
 # ОБРАБОТКА АРГУМЕНТОВ
 # ============================================================================
