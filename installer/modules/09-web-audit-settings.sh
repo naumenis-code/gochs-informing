@@ -700,7 +700,7 @@ fix_asterisk_permissions() {
     local settings_file="$TARGET_APP/api/v1/endpoints/settings.py"
     if [[ -f "$settings_file" ]]; then
         # Заменяем /usr/sbin/asterisk на sudo /usr/sbin/asterisk
-        sed -i 's|/usr/sbin/asterisk|sudo /usr/sbin/asterisk|g' "$settings_file"
+        sed -i 's|cmd = "/usr/sbin/asterisk|cmd = "sudo /usr/sbin/asterisk|g' "$settings_file"
         log_info "  ✓ Команда asterisk в settings.py исправлена на sudo"
     fi
     
