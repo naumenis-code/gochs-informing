@@ -401,38 +401,11 @@ def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
         "extension": config["extension"]
     }
     
-    # Пути к asterisk (пробуем все варианты)
-    asterisk_paths = [
-        "/usr/sbin/asterisk",
-        "/usr/bin/asterisk",
-        "/sbin/asterisk",
-        "/bin/asterisk",
-        "asterisk"  # через PATH
-    ]
-    
     import subprocess
-    import os
-    
-    asterisk_cmd = None
-    for path in asterisk_paths:
-        try:
-            # Проверяем существует ли файл или команда в PATH
-            if os.path.exists(path) or path == "asterisk":
-                test_cmd = [path, "-V"]
-                test_proc = subprocess.run(test_cmd, capture_output=True, timeout=2)
-                if test_proc.returncode == 0:
-                    asterisk_cmd = path
-                    break
-        except:
-            continue
-    
-    if not asterisk_cmd:
-        result["message"] = "Asterisk CLI не найден"
-        return result
     
     try:
-        # Проверяем ИСХОДЯЩУЮ регистрацию
-        cmd = [asterisk_cmd, "-rx", "pjsip show registrations"]
+        # Пробуем с флагом -g чтобы избежать ошибки alwaysfork
+        cmd = ["/usr/sbin/asterisk", "-g", "-rx", "pjsip show registrations"]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         
         if proc.returncode == 0:
@@ -440,35 +413,37 @@ def check_registration_status(config: Dict[str, Any]) -> Dict[str, Any]:
             
             # Ищем freepbx-registration
             for line in output.split('\n'):
-                if 'freepbx-registration' in line or config["host"] in line:
+                if 'freepbx-registration' in line:
                     if 'Registered' in line:
                         result["registered"] = True
-                        result["message"] = "Зарегистрирован на FreePBX"
-                        return result
+                        result["message"] = "Зарегистрирован"
                     elif 'Rejected' in line:
-                        result["registered"] = False
                         result["message"] = "Отклонено (проверьте пароль)"
-                        return result
                     elif 'AuthSent' in line:
-                        result["registered"] = False
-                        result["message"] = "Ожидание аутентификации..."
-                        return result
+                        result["message"] = "Ожидание аутентификации"
+                    else:
+                        result["message"] = "Статус не определен"
+                    return result
             
-            # Если не нашли
-            if 'freepbx-registration' not in output:
-                result["message"] = "Регистрация не настроена в Asterisk"
-            else:
-                result["message"] = "Регистрация не активна"
+            result["message"] = "Регистрация не найдена"
         else:
-            result["message"] = f"Ошибка выполнения: {proc.stderr[:100]}"
-            
-    except subprocess.TimeoutExpired:
-        result["message"] = "Таймаут запроса к Asterisk"
+            # Если с -g не сработало, пробуем без -g
+            if "alwaysfork" in proc.stderr:
+                cmd2 = ["/usr/sbin/asterisk", "-rx", "pjsip show registrations"]
+                proc2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=10)
+                if proc2.returncode == 0:
+                    for line in proc2.stdout.split('\n'):
+                        if 'freepbx-registration' in line and 'Registered' in line:
+                            result["registered"] = True
+                            result["message"] = "Зарегистрирован"
+                            return result
+                result["message"] = "Не удалось получить статус"
+            else:
+                result["message"] = f"Ошибка: {proc.stderr[:50]}"
     except Exception as e:
-        result["message"] = f"Ошибка: {str(e)[:100]}"
+        result["message"] = f"Ошибка: {str(e)}"
     
     return result
-
 
 # ============================================================================
 # ENDPOINTS
