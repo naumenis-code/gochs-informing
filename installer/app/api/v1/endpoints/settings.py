@@ -224,10 +224,10 @@ def read_credentials() -> Dict[str, Any]:
 def get_freepbx_config() -> Dict[str, Any]:
     """Получение полной конфигурации FreePBX"""
     config = {
-        "host": "192.168.0.6",
+        "host": "192.168.1.10",  # Универсальное значение
         "port": 5060,
-        "extension": "291",
-        "username": "291",
+        "extension": "gochs",     # Универсальное значение
+        "username": "gochs",
         "password": "",
         "transport": "udp",
         "max_channels": 20,
@@ -367,7 +367,7 @@ def reload_asterisk_pjsip() -> Dict[str, Any]:
     result = {"success": False, "message": ""}
     
     try:
-        cmd = ["asterisk", "-rx", "pjsip reload"]
+        cmd = ["sudo", "asterisk", "-rx", "pjsip reload"]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         
         if proc.returncode == 0:
@@ -375,16 +375,7 @@ def reload_asterisk_pjsip() -> Dict[str, Any]:
             result["message"] = "PJSIP reloaded successfully"
             return result
         
-        cmd = ["systemctl", "reload", "asterisk"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        
-        if proc.returncode == 0:
-            result["success"] = True
-            result["message"] = "Asterisk reloaded via systemctl"
-            return result
-        
-        result["message"] = "All reload methods failed"
-        
+        # ... остальные попытки
     except Exception as e:
         result["message"] = f"Reload error: {str(e)}"
     
@@ -791,7 +782,7 @@ async def reset_settings():
         "PASSWORD_MIN_LENGTH": "8",
         "REQUIRE_SPECIAL_CHARS": "true",
         "SESSION_TIMEOUT_MINUTES": "30",
-        "EMAIL_ENABLED": "89-postfix.sh",
+        "EMAIL_ENABLED": "false",
         "SMTP_PORT": "587",
         "NOTIFY_CAMPAIGN_COMPLETE": "true",
         "NOTIFY_SYSTEM_ERROR": "true"
