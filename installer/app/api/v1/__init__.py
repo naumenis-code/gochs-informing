@@ -1,194 +1,305 @@
 #!/usr/bin/env python3
-"""API v1 router - ПРАВИЛЬНЫЕ ПРЕФИКСЫ ДЛЯ ВСЕХ МОДУЛЕЙ"""
+"""
+API v1 router - ПРАВИЛЬНЫЕ ПРЕФИКСЫ ДЛЯ ВСЕХ МОДУЛЕЙ
+Соответствует ТЗ, разделы 10, 19, 22, 23
+
+Маршруты API:
+- /api/v1/auth/*       — Аутентификация и авторизация
+- /api/v1/users/*      — Управление пользователями
+- /api/v1/contacts/*   — Управление контактами
+- /api/v1/groups/*     — Управление группами
+- /api/v1/scenarios/*  — Сценарии оповещения
+- /api/v1/campaigns/*  — Кампании обзвона
+- /api/v1/inbound/*    — Входящие звонки
+- /api/v1/playbooks/*  — Плейбуки входящих звонков
+- /api/v1/settings/*   — Системные настройки
+- /api/v1/monitoring/* — Мониторинг и статистика
+- /api/v1/audit/*      — Журнал аудита
+- /api/v1/reports/*    — Отчеты
+- /api/v1/health       — Проверка здоровья
+"""
 
 import logging
 from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# ГЛАВНЫЙ РОУТЕР V1
+# ============================================================================
+
 api_router = APIRouter()
 
-# ============================================================================
-# AUTH - префикс /auth
-# ============================================================================
-try:
-    from app.api.v1.endpoints import auth
-    if hasattr(auth, 'router'):
-        api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
-        logger.info("✓ Auth endpoints registered at /auth")
-    else:
-        logger.error("Auth module has no router")
-except ImportError as e:
-    logger.error(f"Auth endpoints not available: {e}")
+# Счетчики для итоговой статистики
+registered_modules = 0
+failed_modules = 0
+
 
 # ============================================================================
-# USERS - префикс /users
+# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ РЕГИСТРАЦИИ
 # ============================================================================
-try:
-    from app.api.v1.endpoints import users
-    if hasattr(users, 'router'):
-        api_router.include_router(users.router, prefix="/users", tags=["users"])
-        logger.info("✓ Users endpoints registered at /users")
-except ImportError:
-    pass
 
-# ============================================================================
-# CONTACTS - префикс /contacts
-# ============================================================================
-try:
-    from app.api.v1.endpoints import contacts
-    if hasattr(contacts, 'router'):
-        api_router.include_router(contacts.router, prefix="/contacts", tags=["contacts"])
-        logger.info("✓ Contacts endpoints registered at /contacts")
-except ImportError:
-    pass
-
-# ============================================================================
-# GROUPS - префикс /groups
-# ============================================================================
-try:
-    from app.api.v1.endpoints import groups
-    if hasattr(groups, 'router'):
-        api_router.include_router(groups.router, prefix="/groups", tags=["groups"])
-        logger.info("✓ Groups endpoints registered at /groups")
-except ImportError:
-    pass
-
-# ============================================================================
-# SCENARIOS - префикс /scenarios
-# ============================================================================
-try:
-    from app.api.v1.endpoints import scenarios
-    if hasattr(scenarios, 'router'):
-        api_router.include_router(scenarios.router, prefix="/scenarios", tags=["scenarios"])
-        logger.info("✓ Scenarios endpoints registered at /scenarios")
-except ImportError:
-    pass
-
-# ============================================================================
-# CAMPAIGNS - префикс /campaigns
-# ============================================================================
-try:
-    from app.api.v1.endpoints import campaigns
-    if hasattr(campaigns, 'router'):
-        api_router.include_router(campaigns.router, prefix="/campaigns", tags=["campaigns"])
-        logger.info("✓ Campaigns endpoints registered at /campaigns")
-except ImportError:
-    pass
-
-# ============================================================================
-# INBOUND - префикс /inbound
-# ============================================================================
-try:
-    from app.api.v1.endpoints import inbound
-    if hasattr(inbound, 'router'):
-        api_router.include_router(inbound.router, prefix="/inbound", tags=["inbound"])
-        logger.info("✓ Inbound endpoints registered at /inbound")
-except ImportError:
-    pass
-
-# ============================================================================
-# PLAYBOOKS - префикс /playbooks
-# ============================================================================
-try:
-    from app.api.v1.endpoints import playbooks
-    if hasattr(playbooks, 'router'):
-        api_router.include_router(playbooks.router, prefix="/playbooks", tags=["playbooks"])
-        logger.info("✓ Playbooks endpoints registered at /playbooks")
-except ImportError:
-    pass
-
-# ============================================================================
-# SETTINGS - префикс /settings
-# ============================================================================
-try:
-    from app.api.v1.endpoints import settings
-    if hasattr(settings, 'router'):
-        api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
-        logger.info("✓ Settings endpoints registered at /settings")
-    else:
-        logger.error("Settings module has no router")
-except ImportError as e:
-    logger.error(f"Settings endpoints not available: {e}")
-
-# ============================================================================
-# MONITORING - префикс /monitoring
-# ============================================================================
-try:
-    from app.api.v1.endpoints import monitoring
-    if hasattr(monitoring, 'router'):
-        api_router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring"])
-        logger.info("✓ Monitoring endpoints registered at /monitoring")
-except ImportError:
-    pass
-
-# ============================================================================
-# AUDIT - префикс /audit (ВАЖНО: не /auth!)
-# ============================================================================
-try:
-    from app.api.v1.endpoints import audit
-    if hasattr(audit, 'router'):
-        api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
-        logger.info("✓ Audit endpoints registered at /audit")
-    else:
-        logger.error("Audit module has no router - creating stub")
-        raise ImportError("Audit router not found")
-except ImportError as e:
-    logger.error(f"Audit endpoints not available: {e}, creating stub")
+def register_module(
+    module_name: str,
+    prefix: str,
+    tags: list,
+    required: bool = False
+) -> bool:
+    """
+    Безопасная регистрация модуля в роутере
     
-    # Создаем заглушку для аудита
-    from fastapi import APIRouter as StubRouter, Query
+    Args:
+        module_name: имя модуля (для импорта из endpoints)
+        prefix: URL префикс
+        tags: теги для Swagger
+        required: обязательный модуль (создавать заглушку при ошибке)
+        
+    Returns:
+        True если модуль зарегистрирован успешно
+    """
+    global registered_modules, failed_modules
+    
+    try:
+        # Динамический импорт модуля
+        module = __import__(
+            f"app.api.v1.endpoints.{module_name}",
+            fromlist=["router"]
+        )
+        
+        if hasattr(module, 'router'):
+            api_router.include_router(
+                module.router,
+                prefix=prefix,
+                tags=tags
+            )
+            registered_modules += 1
+            logger.info(f"✓ {module_name:15} → {prefix:20} [{', '.join(tags)}]")
+            return True
+        else:
+            logger.error(f"✗ {module_name}: модуль не содержит 'router'")
+            failed_modules += 1
+            
+            if required:
+                _create_stub_module(module_name, prefix, tags)
+            
+            return False
+            
+    except ImportError as e:
+        logger.warning(f"✗ {module_name}: не найден ({e})")
+        failed_modules += 1
+        
+        if required:
+            _create_stub_module(module_name, prefix, tags)
+        
+        return False
+
+
+def _create_stub_module(module_name: str, prefix: str, tags: list):
+    """
+    Создание заглушки для обязательного модуля
+    
+    Используется только для критически важных модулей (audit, auth)
+    """
+    logger.warning(f"  → Создание заглушки для {module_name} {prefix}")
+    
+    from fastapi import APIRouter as StubRouter, Query, HTTPException
     from typing import Optional
+    from datetime import datetime
     
-    stub_router = StubRouter()
+    stub = StubRouter()
     
-    @stub_router.get("/logs")
-    async def stub_logs(skip: int = Query(0), limit: int = Query(100)):
-        return {"items": [], "total": 0, "page": 1, "page_size": limit}
+    @stub.get("/", tags=tags)
+    async def stub_list():
+        return {
+            "items": [],
+            "total": 0,
+            "page": 1,
+            "page_size": 50,
+            "total_pages": 0,
+            "has_next": False,
+            "has_prev": False,
+            "message": f"Модуль {module_name} не загружен (stub)"
+        }
     
-    @stub_router.get("/stats")
-    async def stub_stats():
-        return {"total_events": 0, "today_events": 0, "week_events": 0, "month_events": 0}
-    
-    @stub_router.get("/export")
-    async def stub_export():
-        from fastapi.responses import StreamingResponse
-        import io
-        return StreamingResponse(
-            io.BytesIO(b"id;time;user;action\n"),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=audit.csv"}
+    @stub.get("/{item_id}", tags=tags)
+    async def stub_get(item_id: str):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Модуль {module_name} недоступен"
         )
     
-    @stub_router.post("/log")
-    async def stub_log():
-        return {"success": True, "message": "Event logged (stub)"}
+    @stub.post("/", tags=tags)
+    async def stub_create():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Модуль {module_name} недоступен"
+        )
     
-    api_router.include_router(stub_router, prefix="/audit", tags=["audit"])
-    logger.warning("✓ Audit STUB endpoints registered at /audit")
+    @stub.get("/stats/summary", tags=tags)
+    async def stub_stats():
+        return {"message": f"Статистика {module_name} недоступна"}
+    
+    api_router.include_router(stub, prefix=prefix, tags=tags)
+    logger.warning(f"✓ {module_name:15} → {prefix:20} [STUB] [{', '.join(tags)}]")
+
 
 # ============================================================================
-# REPORTS - префикс /reports
+# РЕГИСТРАЦИЯ ВСЕХ МОДУЛЕЙ
 # ============================================================================
-try:
-    from app.api.v1.endpoints import reports
-    if hasattr(reports, 'router'):
-        api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
-        logger.info("✓ Reports endpoints registered at /reports")
-except ImportError:
-    pass
 
-# ============================================================================
-# HEALTH - без префикса
-# ============================================================================
+logger.info("=" * 70)
+logger.info("Регистрация API модулей v1")
+logger.info("=" * 70)
+
+# --------------------------------------------------------------------------
+# 1. AUTH — Аутентификация (ОБЯЗАТЕЛЬНЫЙ)
+# --------------------------------------------------------------------------
+register_module(
+    module_name="auth",
+    prefix="/auth",
+    tags=["authentication"],
+    required=True
+)
+
+# --------------------------------------------------------------------------
+# 2. USERS — Пользователи (ОБЯЗАТЕЛЬНЫЙ)
+# --------------------------------------------------------------------------
+register_module(
+    module_name="users",
+    prefix="/users",
+    tags=["users"],
+    required=True
+)
+
+# --------------------------------------------------------------------------
+# 3. CONTACTS — Контакты
+# --------------------------------------------------------------------------
+register_module(
+    module_name="contacts",
+    prefix="/contacts",
+    tags=["contacts"]
+)
+
+# --------------------------------------------------------------------------
+# 4. GROUPS — Группы контактов
+# --------------------------------------------------------------------------
+register_module(
+    module_name="groups",
+    prefix="/groups",
+    tags=["groups"]
+)
+
+# --------------------------------------------------------------------------
+# 5. SCENARIOS — Сценарии оповещения
+# --------------------------------------------------------------------------
+register_module(
+    module_name="scenarios",
+    prefix="/scenarios",
+    tags=["scenarios"]
+)
+
+# --------------------------------------------------------------------------
+# 6. CAMPAIGNS — Кампании обзвона
+# --------------------------------------------------------------------------
+register_module(
+    module_name="campaigns",
+    prefix="/campaigns",
+    tags=["campaigns"]
+)
+
+# --------------------------------------------------------------------------
+# 7. INBOUND — Входящие звонки
+# --------------------------------------------------------------------------
+register_module(
+    module_name="inbound",
+    prefix="/inbound",
+    tags=["inbound"]
+)
+
+# --------------------------------------------------------------------------
+# 8. PLAYBOOKS — Плейбуки
+# --------------------------------------------------------------------------
+register_module(
+    module_name="playbooks",
+    prefix="/playbooks",
+    tags=["playbooks"]
+)
+
+# --------------------------------------------------------------------------
+# 9. SETTINGS — Настройки системы
+# --------------------------------------------------------------------------
+register_module(
+    module_name="settings",
+    prefix="/settings",
+    tags=["settings"]
+)
+
+# --------------------------------------------------------------------------
+# 10. MONITORING — Мониторинг
+# --------------------------------------------------------------------------
+register_module(
+    module_name="monitoring",
+    prefix="/monitoring",
+    tags=["monitoring"]
+)
+
+# --------------------------------------------------------------------------
+# 11. AUDIT — Журнал аудита (ОБЯЗАТЕЛЬНЫЙ)
+# --------------------------------------------------------------------------
+register_module(
+    module_name="audit",
+    prefix="/audit",
+    tags=["audit"],
+    required=True
+)
+
+# --------------------------------------------------------------------------
+# 12. REPORTS — Отчеты
+# --------------------------------------------------------------------------
+register_module(
+    module_name="reports",
+    prefix="/reports",
+    tags=["reports"]
+)
+
+# --------------------------------------------------------------------------
+# 13. HEALTH — Проверка здоровья (без префикса)
+# --------------------------------------------------------------------------
 try:
     from app.api.v1.endpoints import health
     if hasattr(health, 'router'):
         api_router.include_router(health.router, tags=["health"])
-        logger.info("✓ Health endpoints registered")
+        registered_modules += 1
+        logger.info(f"✓ health          → (без префикса)     [health]")
+    else:
+        logger.warning("✗ health: модуль не содержит 'router'")
+        failed_modules += 1
 except ImportError:
-    pass
+    logger.warning("✗ health: не найден")
+    failed_modules += 1
+
 
 # ============================================================================
-# ИТОГ
+# ИТОГОВАЯ СТАТИСТИКА
 # ============================================================================
-logger.info(f"API router configured with {len(api_router.routes)} routes")
+
+total_routes = len(api_router.routes)
+logger.info("=" * 70)
+logger.info(f"РЕГИСТРАЦИЯ ЗАВЕРШЕНА")
+logger.info(f"  Модулей зарегистрировано: {registered_modules}")
+logger.info(f"  Модулей не загружено:     {failed_modules}")
+logger.info(f"  Всего маршрутов:          {total_routes}")
+logger.info("=" * 70)
+
+# Вывод всех маршрутов (для отладки)
+if logger.isEnabledFor(logging.DEBUG):
+    logger.debug("Зарегистрированные маршруты:")
+    for route in api_router.routes:
+        logger.debug(f"  {route.methods if hasattr(route, 'methods') else 'GET':10} {route.path}")
+
+
+# ============================================================================
+# ЭКСПОРТ
+# ============================================================================
+
+__all__ = ["api_router"]
