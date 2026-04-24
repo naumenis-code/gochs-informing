@@ -12,8 +12,8 @@ try:
     from app.schemas.auth import (
         Token,
         TokenData,
-        UserCreate,
-        UserResponse,
+        UserCreate as AuthUserCreate,
+        UserResponse as AuthUserResponse,
         LoginRequest,
         RefreshTokenRequest,
         LogoutResponse,
@@ -21,15 +21,15 @@ try:
         PasswordResetRequest,
     )
     AUTH_SCHEMAS = [
-        "Token", "TokenData", "UserCreate", "UserResponse", "LoginRequest",
+        "Token", "TokenData", "AuthUserCreate", "AuthUserResponse", "LoginRequest",
         "RefreshTokenRequest", "LogoutResponse", "PasswordChangeRequest", "PasswordResetRequest"
     ]
 except ImportError as e:
     logger.warning(f"Auth schemas not available: {e}")
     Token = None
     TokenData = None
-    UserCreate = None
-    UserResponse = None
+    AuthUserCreate = None
+    AuthUserResponse = None
     LoginRequest = None
     RefreshTokenRequest = None
     LogoutResponse = None
@@ -38,22 +38,180 @@ except ImportError as e:
     AUTH_SCHEMAS = []
 
 # ============================================================================
-# USER SCHEMAS
+# USER SCHEMAS (НОВЫЕ - из 09)
 # ============================================================================
 try:
     from app.schemas.user import (
-        User,
-        UserListResponse,
-        UserUpdateRequest,
         UserRole,
+        UserStatus,
+        UserBase,
+        UserCreate,
+        UserUpdate,
+        UserPasswordChange,
+        UserPasswordReset,
+        UserResponse as UserDetailResponse,
+        UserListResponse,
+        UserLoginResponse,
+        UserFilterParams,
     )
-    USER_SCHEMAS = ["User", "UserListResponse", "UserUpdateRequest", "UserRole"]
-except ImportError:
-    User = None
-    UserListResponse = None
-    UserUpdateRequest = None
+    USER_SCHEMAS = [
+        "UserRole", "UserStatus", "UserBase", "UserCreate", "UserUpdate",
+        "UserPasswordChange", "UserPasswordReset", "UserDetailResponse",
+        "UserListResponse", "UserLoginResponse", "UserFilterParams"
+    ]
+except ImportError as e:
+    logger.warning(f"User schemas not available: {e}")
     UserRole = None
+    UserStatus = None
+    UserBase = None
+    UserCreate = None
+    UserUpdate = None
+    UserPasswordChange = None
+    UserPasswordReset = None
+    UserDetailResponse = None
+    UserListResponse = None
+    UserLoginResponse = None
+    UserFilterParams = None
     USER_SCHEMAS = []
+
+# ============================================================================
+# CONTACT SCHEMAS (НОВЫЕ - из 10)
+# ============================================================================
+try:
+    from app.schemas.contact import (
+        ContactBase,
+        ContactCreate,
+        ContactUpdate,
+        ContactResponse,
+        ContactListResponse,
+        ContactTagInfo,
+        ContactGroupInfo,
+        ContactImportRow,
+        ContactImportRequest,
+        ContactExportRequest,
+        ContactFilterParams,
+        ContactBulkAction,
+        ContactBulkDelete,
+        ContactStats,
+    )
+    CONTACT_SCHEMAS = [
+        "ContactBase", "ContactCreate", "ContactUpdate", "ContactResponse",
+        "ContactListResponse", "ContactTagInfo", "ContactGroupInfo",
+        "ContactImportRow", "ContactImportRequest", "ContactExportRequest",
+        "ContactFilterParams", "ContactBulkAction", "ContactBulkDelete",
+        "ContactStats"
+    ]
+except ImportError as e:
+    logger.warning(f"Contact schemas not available: {e}")
+    ContactBase = None
+    ContactCreate = None
+    ContactUpdate = None
+    ContactResponse = None
+    ContactListResponse = None
+    ContactTagInfo = None
+    ContactGroupInfo = None
+    ContactImportRow = None
+    ContactImportRequest = None
+    ContactExportRequest = None
+    ContactFilterParams = None
+    ContactBulkAction = None
+    ContactBulkDelete = None
+    ContactStats = None
+    CONTACT_SCHEMAS = []
+
+# ============================================================================
+# GROUP SCHEMAS (НОВЫЕ - из 11)
+# ============================================================================
+try:
+    from app.schemas.group import (
+        GroupBase,
+        GroupCreate,
+        GroupUpdate,
+        GroupResponse,
+        GroupListResponse,
+        GroupDetailResponse,
+        GroupMemberInfo,
+        GroupFilterParams,
+        GroupBulkAction,
+        GroupMergeRequest,
+        GroupStats,
+        GroupDialerInfo,
+        AddMembersRequest,
+        RemoveMembersRequest,
+        UpdateMemberRequest,
+    )
+    GROUP_SCHEMAS = [
+        "GroupBase", "GroupCreate", "GroupUpdate", "GroupResponse",
+        "GroupListResponse", "GroupDetailResponse", "GroupMemberInfo",
+        "GroupFilterParams", "GroupBulkAction", "GroupMergeRequest",
+        "GroupStats", "GroupDialerInfo", "AddMembersRequest",
+        "RemoveMembersRequest", "UpdateMemberRequest"
+    ]
+except ImportError as e:
+    logger.warning(f"Group schemas not available: {e}")
+    GroupBase = None
+    GroupCreate = None
+    GroupUpdate = None
+    GroupResponse = None
+    GroupListResponse = None
+    GroupDetailResponse = None
+    GroupMemberInfo = None
+    GroupFilterParams = None
+    GroupBulkAction = None
+    GroupMergeRequest = None
+    GroupStats = None
+    GroupDialerInfo = None
+    AddMembersRequest = None
+    RemoveMembersRequest = None
+    UpdateMemberRequest = None
+    GROUP_SCHEMAS = []
+
+# ============================================================================
+# PLAYBOOK SCHEMAS (НОВЫЕ - из 12)
+# ============================================================================
+try:
+    from app.schemas.playbook import (
+        GreetingSource,
+        PlaybookCategory,
+        PlaybookStatus,
+        PlaybookBase,
+        PlaybookCreate,
+        PlaybookUpdate,
+        PlaybookStatusUpdate,
+        PlaybookResponse,
+        PlaybookListResponse,
+        PlaybookCloneRequest,
+        TTSGenerateRequest,
+        TTSGenerateResponse,
+        AudioUploadResponse,
+        PlaybookTestRequest,
+        PlaybookTestResponse,
+    )
+    PLAYBOOK_SCHEMAS = [
+        "GreetingSource", "PlaybookCategory", "PlaybookStatus",
+        "PlaybookBase", "PlaybookCreate", "PlaybookUpdate",
+        "PlaybookStatusUpdate", "PlaybookResponse", "PlaybookListResponse",
+        "PlaybookCloneRequest", "TTSGenerateRequest", "TTSGenerateResponse",
+        "AudioUploadResponse", "PlaybookTestRequest", "PlaybookTestResponse"
+    ]
+except ImportError as e:
+    logger.warning(f"Playbook schemas not available: {e}")
+    GreetingSource = None
+    PlaybookCategory = None
+    PlaybookStatus = None
+    PlaybookBase = None
+    PlaybookCreate = None
+    PlaybookUpdate = None
+    PlaybookStatusUpdate = None
+    PlaybookResponse = None
+    PlaybookListResponse = None
+    PlaybookCloneRequest = None
+    TTSGenerateRequest = None
+    TTSGenerateResponse = None
+    AudioUploadResponse = None
+    PlaybookTestRequest = None
+    PlaybookTestResponse = None
+    PLAYBOOK_SCHEMAS = []
 
 # ============================================================================
 # CAMPAIGN SCHEMAS
@@ -83,52 +241,6 @@ except ImportError:
     CampaignStopRequest = None
     CampaignStats = None
     CAMPAIGN_SCHEMAS = []
-
-# ============================================================================
-# CONTACT SCHEMAS
-# ============================================================================
-try:
-    from app.schemas.contact import (
-        ContactCreate,
-        ContactUpdate,
-        ContactResponse,
-        ContactListResponse,
-        ContactImportResponse,
-    )
-    CONTACT_SCHEMAS = [
-        "ContactCreate", "ContactUpdate", "ContactResponse",
-        "ContactListResponse", "ContactImportResponse"
-    ]
-except ImportError:
-    ContactCreate = None
-    ContactUpdate = None
-    ContactResponse = None
-    ContactListResponse = None
-    ContactImportResponse = None
-    CONTACT_SCHEMAS = []
-
-# ============================================================================
-# GROUP SCHEMAS
-# ============================================================================
-try:
-    from app.schemas.group import (
-        GroupCreate,
-        GroupUpdate,
-        GroupResponse,
-        GroupListResponse,
-        GroupMembersRequest,
-    )
-    GROUP_SCHEMAS = [
-        "GroupCreate", "GroupUpdate", "GroupResponse",
-        "GroupListResponse", "GroupMembersRequest"
-    ]
-except ImportError:
-    GroupCreate = None
-    GroupUpdate = None
-    GroupResponse = None
-    GroupListResponse = None
-    GroupMembersRequest = None
-    GROUP_SCHEMAS = []
 
 # ============================================================================
 # SCENARIO SCHEMAS
@@ -175,66 +287,18 @@ except ImportError:
     INBOUND_SCHEMAS = []
 
 # ============================================================================
-# PLAYBOOK SCHEMAS
-# ============================================================================
-try:
-    from app.schemas.playbook import (
-        PlaybookCreate,
-        PlaybookUpdate,
-        PlaybookResponse,
-        PlaybookListResponse,
-        PlaybookActivateRequest,
-    )
-    PLAYBOOK_SCHEMAS = [
-        "PlaybookCreate", "PlaybookUpdate", "PlaybookResponse",
-        "PlaybookListResponse", "PlaybookActivateRequest"
-    ]
-except ImportError:
-    PlaybookCreate = None
-    PlaybookUpdate = None
-    PlaybookResponse = None
-    PlaybookListResponse = None
-    PlaybookActivateRequest = None
-    PLAYBOOK_SCHEMAS = []
-
-# ============================================================================
 # SETTINGS SCHEMAS
 # ============================================================================
 try:
     from app.schemas.settings import (
-        # PBX
-        PBXSettings,
-        PBXSettingsUpdate,
-        PBXSettingsResponse,
-        PBXStatusResponse,
-        PBXTestResponse,
-        PBXReloadResponse,
-        PBXApplyResponse,
-        # System
-        SystemSettings,
-        SystemSettingsUpdate,
-        SystemSettingsResponse,
-        # Security
-        SecuritySettings,
-        SecuritySettingsUpdate,
-        SecuritySettingsResponse,
-        # Notifications
-        NotificationSettings,
-        NotificationSettingsUpdate,
-        NotificationSettingsResponse,
-        # All
-        AllSettingsResponse,
-        # Credentials
-        CredentialsInfoResponse,
-        # Backup
-        BackupResponse,
-        BackupListItem,
-        BackupsListResponse,
-        # Reset
-        ResetSettingsResponse,
-        # Enums
-        TransportType,
-        LogLevel,
+        PBXSettings, PBXSettingsUpdate, PBXSettingsResponse,
+        PBXStatusResponse, PBXTestResponse, PBXReloadResponse, PBXApplyResponse,
+        SystemSettings, SystemSettingsUpdate, SystemSettingsResponse,
+        SecuritySettings, SecuritySettingsUpdate, SecuritySettingsResponse,
+        NotificationSettings, NotificationSettingsUpdate, NotificationSettingsResponse,
+        AllSettingsResponse, CredentialsInfoResponse,
+        BackupResponse, BackupListItem, BackupsListResponse,
+        ResetSettingsResponse, TransportType, LogLevel,
     )
     SETTINGS_SCHEMAS = [
         "PBXSettings", "PBXSettingsUpdate", "PBXSettingsResponse",
@@ -279,16 +343,9 @@ except ImportError as e:
 # ============================================================================
 try:
     from app.schemas.audit import (
-        AuditStatus,
-        AuditLogBase,
-        AuditLogCreate,
-        AuditLogUpdate,
-        AuditLogResponse,
-        AuditStatsResponse,
-        DailyStatsResponse,
-        UserActivityResponse,
-        AuditLogFilterParams,
-        AuditLogListResponse,
+        AuditStatus, AuditLogBase, AuditLogCreate, AuditLogUpdate,
+        AuditLogResponse, AuditStatsResponse, DailyStatsResponse,
+        UserActivityResponse, AuditLogFilterParams, AuditLogListResponse,
         ClearOldLogsResponse,
     )
     AUDIT_SCHEMAS = [
@@ -334,28 +391,58 @@ except ImportError:
     MONITORING_SCHEMAS = []
 
 # ============================================================================
-# COMMON SCHEMAS
+# COMMON SCHEMAS (НОВЫЕ - из 08)
 # ============================================================================
 try:
     from app.schemas.common import (
         PaginationParams,
         PaginatedResponse,
-        SortParams,
-        FilterParams,
+        MessageResponse,
         ErrorResponse,
         SuccessResponse,
+        IDResponse,
+        BulkOperationResult,
+        SortParams,
+        FilterParam,
+        SearchParams,
+        DateRangeParams,
+        TimeRangeParams,
+        ExportParams,
+        FileUploadResponse,
+        AudioFileInfo,
+        SelectOption,
+        StatsOverview,
+        CountItem,
+        StatsByCategory,
     )
     COMMON_SCHEMAS = [
-        "PaginationParams", "PaginatedResponse", "SortParams",
-        "FilterParams", "ErrorResponse", "SuccessResponse"
+        "PaginationParams", "PaginatedResponse", "MessageResponse",
+        "ErrorResponse", "SuccessResponse", "IDResponse", "BulkOperationResult",
+        "SortParams", "FilterParam", "SearchParams", "DateRangeParams",
+        "TimeRangeParams", "ExportParams", "FileUploadResponse", "AudioFileInfo",
+        "SelectOption", "StatsOverview", "CountItem", "StatsByCategory"
     ]
-except ImportError:
+except ImportError as e:
+    logger.warning(f"Common schemas not available: {e}")
     PaginationParams = None
     PaginatedResponse = None
-    SortParams = None
-    FilterParams = None
+    MessageResponse = None
     ErrorResponse = None
     SuccessResponse = None
+    IDResponse = None
+    BulkOperationResult = None
+    SortParams = None
+    FilterParam = None
+    SearchParams = None
+    DateRangeParams = None
+    TimeRangeParams = None
+    ExportParams = None
+    FileUploadResponse = None
+    AudioFileInfo = None
+    SelectOption = None
+    StatsOverview = None
+    CountItem = None
+    StatsByCategory = None
     COMMON_SCHEMAS = []
 
 # ============================================================================
@@ -366,18 +453,18 @@ __all__ = []
 
 __all__.extend(AUTH_SCHEMAS)
 __all__.extend(USER_SCHEMAS)
-__all__.extend(CAMPAIGN_SCHEMAS)
 __all__.extend(CONTACT_SCHEMAS)
 __all__.extend(GROUP_SCHEMAS)
+__all__.extend(PLAYBOOK_SCHEMAS)
+__all__.extend(CAMPAIGN_SCHEMAS)
 __all__.extend(SCENARIO_SCHEMAS)
 __all__.extend(INBOUND_SCHEMAS)
-__all__.extend(PLAYBOOK_SCHEMAS)
 __all__.extend(SETTINGS_SCHEMAS)
 __all__.extend(AUDIT_SCHEMAS)
 __all__.extend(MONITORING_SCHEMAS)
 __all__.extend(COMMON_SCHEMAS)
 
-# Убираем дубликаты
+# Убираем дубликаты (сохраняя порядок)
 __all__ = list(dict.fromkeys(__all__))
 
 
@@ -385,7 +472,7 @@ __all__ = list(dict.fromkeys(__all__))
 # ОЧИСТКА None ЗНАЧЕНИЙ
 # ============================================================================
 def _cleanup_none_exports():
-    """Удаляет None значения из глобального пространства"""
+    """Удаляет None значения из глобального пространства и __all__"""
     import sys
     frame = sys._getframe(1)
     globals_dict = frame.f_globals
@@ -399,5 +486,63 @@ def _cleanup_none_exports():
         del globals_dict[key]
         if key in __all__:
             __all__.remove(key)
+    
+    if keys_to_remove:
+        logger.info(f"Removed {len(keys_to_remove)} unavailable schemas: {keys_to_remove}")
 
 _cleanup_none_exports()
+
+
+# ============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================================
+
+def get_available_schemas() -> dict:
+    """Получить словарь доступных схем по категориям"""
+    categories = {
+        "auth": AUTH_SCHEMAS,
+        "user": USER_SCHEMAS,
+        "contact": CONTACT_SCHEMAS,
+        "group": GROUP_SCHEMAS,
+        "playbook": PLAYBOOK_SCHEMAS,
+        "campaign": CAMPAIGN_SCHEMAS,
+        "scenario": SCENARIO_SCHEMAS,
+        "inbound": INBOUND_SCHEMAS,
+        "settings": SETTINGS_SCHEMAS,
+        "audit": AUDIT_SCHEMAS,
+        "monitoring": MONITORING_SCHEMAS,
+        "common": COMMON_SCHEMAS,
+    }
+    
+    result = {}
+    for category, names in categories.items():
+        available = [name for name in names if globals().get(name) is not None]
+        if available:
+            result[category] = available
+    
+    return result
+
+
+def print_schemas_summary():
+    """Вывести сводку по доступным схемам (для отладки)"""
+    print("=" * 70)
+    print("ДОСТУПНЫЕ PYDANTIC СХЕМЫ")
+    print("=" * 70)
+    
+    available = get_available_schemas()
+    total = 0
+    
+    for category, names in available.items():
+        print(f"\n{category.upper()} ({len(names)}):")
+        for name in names:
+            schema = globals().get(name)
+            if schema:
+                doc = schema.__doc__ or ""
+                doc_first_line = doc.strip().split('\n')[0] if doc else "-"
+                print(f"  ✓ {name:<35} {doc_first_line[:40]}")
+                total += 1
+    
+    print(f"\n{'=' * 70}")
+    print(f"Всего доступно схем: {total}")
+    print(f"Всего в __all__: {len(__all__)}")
+    print(f"{'=' * 70}")
