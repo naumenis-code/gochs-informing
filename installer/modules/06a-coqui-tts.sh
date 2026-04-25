@@ -225,7 +225,7 @@ generate_audio_file() {
     local output="$2"
     
     log_info "Генерация: $(basename "$output")"
-    if python "$INSTALL_DIR/app/tts_generator.py" --text "$text" --output "$output"; then
+    if PYTHONPATH="$INSTALL_DIR" "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/app/tts_generator.py" --text "$text" --output "$output"; then
         chown "$GOCHS_USER:$GOCHS_GROUP" "$output" 2>/dev/null || true
         log_info "  Файл создан: $output"
     else
