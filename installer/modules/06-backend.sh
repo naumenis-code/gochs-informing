@@ -719,8 +719,11 @@ EOF
         "auth" "users" "contacts" "groups" "scenarios" "campaigns" "inbound" "playbooks" "settings" "monitoring"
     )
     
+    # Создаем заглушки ТОЛЬКО для тех файлов, которых еще нет
     for ep in "${endpoints[@]}"; do
-        cat > "$INSTALL_DIR/app/api/v1/endpoints/${ep}.py" << EOF
+        local ep_file="$INSTALL_DIR/app/api/v1/endpoints/${ep}.py"
+        if [[ ! -f "$ep_file" ]]; then
+            cat > "$ep_file" << EOF
 #!/usr/bin/env python3
 """${ep} endpoints"""
 
@@ -736,7 +739,25 @@ async def list_${ep}():
 async def get_${ep}(item_id: str):
     return {"id": item_id}
 EOF
+            log_info "  ✓ Создана заглушка для ${ep}.py"
+        else
+            log_info "  ${ep}.py уже существует, пропускаем"
+        fi
     done
+
+    # Копирование готовых endpoint-файлов из installer (если есть)
+    log_info "Копирование готовых endpoint-файлов из installer..."
+    local installer_endpoints_dir="${SCRIPT_DIR}/app/api/v1/endpoints"
+    if [[ -d "$installer_endpoints_dir" ]]; then
+        for ep_file in "$installer_endpoints_dir"/*.py; do
+            if [[ -f "$ep_file" ]]; then
+                cp "$ep_file" "$INSTALL_DIR/app/api/v1/endpoints/"
+                log_info "  ✓ $(basename "$ep_file") скопирован из installer"
+            fi
+        done
+    else
+        log_warn "  Директория ${installer_endpoints_dir} не найдена"
+    fi
     
     # auth.py (полная версия)
     cat > "$INSTALL_DIR/app/api/v1/endpoints/auth.py" << 'EOF'
