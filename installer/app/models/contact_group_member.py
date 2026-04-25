@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
 from sqlalchemy import (
+    Integer,
     Column, String, DateTime, Index, UniqueConstraint, ForeignKey, Boolean, Text
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -372,7 +373,7 @@ class ContactGroupMember(Base):
         result = await db_session.execute(stmt)
         group = result.scalar_one_or_none()
         if not group:
-            raise ValueError(f"Г�������па с ID {group_id} не найдена")
+            raise ValueError(f"Г       па с ID {group_id} не найдена")
         if group.is_archived:
             raise ValueError(f"Группа '{group.name}' в архиве")
         
@@ -600,5 +601,3 @@ class ContactGroupMember(Base):
         return f"<ContactGroupMember(contact='{self.contact_name}', group='{self.group_name}', status='{status}')>"
 
 
-# Необходимые импорты (добавить в начало файла)
-from sqlalchemy import Integer
