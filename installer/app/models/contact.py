@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean, Text,
     Column, String, Boolean, DateTime, Text, ForeignKey,
     Index, event, inspect
 )
