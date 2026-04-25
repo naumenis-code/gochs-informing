@@ -19,6 +19,7 @@ from typing import Optional, List
 from uuid import UUID
 
 from fastapi import (
+    Path,
     APIRouter, Depends, HTTPException, status, Query,
     Request, UploadFile, File
 )
@@ -205,7 +206,7 @@ async def get_playbook(
 )
 async def download_playbook_audio(
     playbook_id: UUID,
-    audio_type: str = Query(..., description="Тип аудио: greeting, post_beep, closing"),
+    audio_type: str = Path(..., description="Тип аудио: greeting, post_beep, closing"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -331,7 +332,7 @@ async def create_playbook(
     description="Создает новый плейбук на основе предопределенного шаблона."
 )
 async def create_playbook_from_template(
-    template_name: str = Query(..., description="Имя шаблона: default, emergency, short"),
+    template_name: str = Path(..., description="Имя шаблона: default, emergency, short"),
     request: Request = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
@@ -671,7 +672,7 @@ async def generate_tts(
 async def upload_audio(
     playbook_id: UUID,
     file: UploadFile = File(..., description="Аудиофайл (WAV, MP3, OGG)"),
-    audio_type: str = Query("greeting", description="Тип: greeting, post_beep, closing"),
+    audio_type: str = Path("greeting", description="Тип: greeting, post_beep, closing"),
     auto_convert: bool = Query(True, description="Автоконвертация в формат Asterisk"),
     request: Request = None,
     db: AsyncSession = Depends(get_db),
