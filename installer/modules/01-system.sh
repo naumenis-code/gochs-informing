@@ -122,9 +122,9 @@ install() {
     # Создание пользователя системы
     log_info "Создание системного пользователя..."
     if ! id -u "$GOCHS_USER" &>/dev/null; then
-        useradd -r -m -d "$INSTALL_DIR" -s /bin/bash "$GOCHS_USER"
-        usermod -aG audio "$GOCHS_USER"
-        usermod -aG www-data "$GOCHS_USER"
+        /usr/sbin/useradd -r -m -d "$INSTALL_DIR" -s /bin/bash "$GOCHS_USER"
+        /usr/sbin/usermod -aG audio "$GOCHS_USER"
+        /usr/sbin/usermod -aG www-data "$GOCHS_USER"
     fi
     
     # Создание структуры каталогов
@@ -135,15 +135,15 @@ install() {
     
     # Настройка firewall
     log_info "Настройка firewall (UFW)..."
-    ufw --force disable
-    ufw default deny incoming
-    ufw default allow outgoing
-    ufw allow 22/tcp comment 'SSH'
-    ufw allow 80/tcp comment 'HTTP'
-    ufw allow 443/tcp comment 'HTTPS'
-    ufw allow 5060/udp comment 'SIP'
-    ufw allow 10000:20000/udp comment 'RTP'
-    ufw --force enable
+    /usr/sbin/ufw --force disable
+    /usr/sbin/ufw default deny incoming
+    /usr/sbin/ufw default allow outgoing
+    /usr/sbin/ufw allow 22/tcp comment 'SSH'
+    /usr/sbin/ufw allow 80/tcp comment 'HTTP'
+    /usr/sbin/ufw allow 443/tcp comment 'HTTPS'
+    /usr/sbin/ufw allow 5060/udp comment 'SIP'
+    /usr/sbin/ufw allow 10000:20000/udp comment 'RTP'
+    /usr/sbin/ufw --force enable
     
     # Настройка fail2ban
     log_info "Настройка fail2ban..."
@@ -176,7 +176,7 @@ net.ipv4.tcp_keepalive_probes = 5
 net.ipv4.ip_local_port_range = 1024 65535
 EOF
     
-    sysctl -p /etc/sysctl.d/99-gochs.conf
+    /usr/sbin/sysctl -p /etc/sysctl.d/99-gochs.conf
     
     log_info "Модуль ${MODULE_NAME} успешно установлен"
     return 0
