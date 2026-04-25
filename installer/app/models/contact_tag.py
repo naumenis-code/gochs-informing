@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import (
+    String,
     Column, DateTime, Index, UniqueConstraint, ForeignKey
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -387,5 +388,3 @@ class ContactTag(Base):
         return f"<ContactTag(contact='{self.contact_name}', tag='{self.tag_name}')>"
 
 
-# Необходимые импорты (в начало файла)
-from sqlalchemy import String
