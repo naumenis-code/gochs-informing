@@ -456,7 +456,7 @@ EOF
     # Замена переменных в конфиге
     sed -i "s|/opt/gochs-informing|$INSTALL_DIR|g" /etc/nginx/conf.d/gochs.conf
     
-    if nginx -t 2>&1; then
+    if /usr/sbin/nginx -t 2>&1; then
         log_info "HTTPS конфигурация создана и проверена"
     else
         log_error "Ошибка в HTTPS конфигурации"
@@ -486,7 +486,7 @@ net.ipv4.tcp_keepalive_intvl = 15
 net.ipv4.tcp_keepalive_probes = 3
 EOF
 
-    sysctl -p /etc/sysctl.d/99-nginx.conf 2>/dev/null || true
+    /usr/sbin/sysctl -p /etc/sysctl.d/99-nginx.conf 2>/dev/null || true
     
     log_info "Nginx оптимизирован"
 }
