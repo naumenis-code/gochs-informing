@@ -716,62 +716,117 @@ export default Login;
 EOF
 
     # Dashboard.tsx
-    cat > "$INSTALL_DIR/frontend/src/pages/Dashboard.tsx" << 'EOF'
-import React, { useEffect, useState } from 'react';
-import { Row, Col, Card, Statistic, Table, Tag, Progress, Badge, Space, Typography } from 'antd';
+    cat > "$INSTALL_DIR/frontend/src/pages/Dashboard.tsx" << 'DASHBOARDEOF'
+import React, { useEffect, useState, useCallback } from 'react';
+import { Row, Col, Card, Statistic, Table, Tag, Progress, Badge, Space, Typography, Spin } from 'antd';
 import {
   PhoneOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-  UserOutlined,
   LineChartOutlined,
   ClockCircleOutlined,
   ThunderboltOutlined,
+  ReloadOutlined,
+  SafetyOutlined,
+  InboxOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
-import { useWebSocket } from '@hooks/useWebSocket';
-import { monitoringService } from '@services/monitoringService';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
+
+interface ChannelStats {
+  total_channels: number;
+  used_channels: number;
+  free_channels: number;
+  gochs_channels: number;
+  inbound_calls: number;
+  outbound_calls: number;
+}
+
+interface ServiceStatus {
+  api: 'online' | 'offline';
+  database: 'online' | 'offline';
+  redis: 'online' | 'offline';
+  asterisk: 'online' | 'offline';
+  pbx_registration: 'online' | 'offline';
+}
+
+interface ActiveCampaign {
+  id: string;
+  name: string;
+  scenario_name: string;
+  total_contacts: number;
+  completed_calls: number;
+  failed_calls: number;
+  in_progress_calls: number;
+  status: string;
+  progress_percent: number;
+}
+
+interface RecentCall {
+  id: string;
+  time: string;
+  caller_number: string;
+  caller_name?: string;
+  duration: number;
+  status: string;
+  has_recording: boolean;
+  has_transcription: boolean;
+}
 
 const Dashboard: React.FC = () => {
-  const [stats, setStats] = useState({
-    totalChannels: 50,
-    usedChannels: 0,
-    freeChannels: 50,
-    gochsChannels: 0,
-    inboundCalls: 0,
-    outboundCalls: 0,
-    activeCampaigns: 0,
-    completedCampaigns: 0,
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [channelStats, setChannelStats] = useState<ChannelStats>({
+    total_channels: 0, used_channels: 0, free_channels: 0,
+    gochs_channels: 0, inbound_calls: 0, outbound_calls: 0,
   });
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
+    api: 'offline', database: 'offline', redis: 'offline',
+    asterisk: 'offline', pbx_registration: 'offline',
+  });
+  const [activeCampaigns, setActiveCampaigns] = useState<ActiveCampaign[]>([]);
+  const [recentInboundCalls, setRecentInboundCalls] = useState<RecentCall[]>([]);
 
-  const [apiStatus, setApiStatus] = useState<'online' | 'offline' | 'checking'>('checking');
-  const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
-  const [redisStatus, setRedisStatus] = useState<'online' | 'offline' | 'checking'>('checking');
-  const [asteriskStatus, setAsteriskStatus] = useState<'online' | 'offline' | 'checking'>('checking');
-
-  const { connected } = useWebSocket('/ws');
-
-  useEffect(() => {
-    const checkHealth = async () => {
+  const fetchAllData = useCallback(async () => {
+    try {
+      setError(null);
+      const healthRes = await fetch('/health');
+      const healthData = await healthRes.json();
+      setServiceStatus({
+        api: healthData.status === 'healthy' ? 'online' : 'offline',
+        database: healthData.database === true ? 'online' : 'offline',
+        redis: healthData.redis === true ? 'online' : 'offline',
+        asterisk: healthData.asterisk === true ? 'online' : 'offline',
+        pbx_registration: healthData.pbx_registration === true ? 'online' : 'offline',
+      });
       try {
-        const data = await monitoringService.getHealth();
-        setApiStatus(data.status === 'healthy' ? 'online' : 'offline');
-        setDbStatus(data.database ? 'online' : 'offline');
-        setRedisStatus(data.redis ? 'online' : 'offline');
-        setAsteriskStatus(data.asterisk ? 'online' : 'offline');
-      } catch {
-        setApiStatus('offline');
-        setDbStatus('offline');
-        setRedisStatus('offline');
-        setAsteriskStatus('offline');
-      }
-    };
-    
-    checkHealth();
-    const interval = setInterval(checkHealth, 10000);
-    return () => clearInterval(interval);
+        const statsRes = await fetch('/api/v1/monitoring/channels/stats');
+        if (statsRes.ok) {
+          const d = await statsRes.json();
+          setChannelStats({
+            total_channels: d.total_channels || 0, used_channels: d.used_channels || 0,
+            free_channels: d.free_channels || 0, gochs_channels: d.gochs_channels || 0,
+            inbound_calls: d.inbound_calls || 0, outbound_calls: d.outbound_calls || 0,
+          });
+        }
+      } catch {}
+      try {
+        const campRes = await fetch('/api/v1/campaigns/active');
+        if (campRes.ok) setActiveCampaigns((await campRes.json()).campaigns || []);
+      } catch {}
+      try {
+        const callsRes = await fetch('/api/v1/monitoring/inbound/recent?limit=10');
+        if (callsRes.ok) setRecentInboundCalls((await callsRes.json()).calls || []);
+      } catch {}
+    } catch (err: any) {
+      setError(err?.message || 'Ошибка загрузки данных');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { fetchAllData(); const t = setInterval(fetchAllData, 10000); return () => clearInterval(t); }, [fetchAllData]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -781,121 +836,87 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const getCallStatusTag = (status: string) => {
+    const m: Record<string, { color: string; text: string }> = {
+      answered: { color: 'success', text: 'Отвечен' },
+      missed: { color: 'error', text: 'Пропущен' },
+      recorded: { color: 'processing', text: 'Записан' },
+      transcribed: { color: 'blue', text: 'Расшифрован' },
+    };
+    const c = m[status] || { color: 'default', text: status };
+    return <Tag color={c.color}>{c.text}</Tag>;
+  };
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 100 }}><Spin size="large" /></div>;
+
+  const chPct = channelStats.total_channels > 0 ? Math.round((channelStats.used_channels / channelStats.total_channels) * 100) : 0;
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <Title level={2} style={{ margin: 0 }}>Панель управления</Title>
-        <Space size="large">
-          <span>API: {getStatusBadge(apiStatus)}</span>
-          <span>БД: {getStatusBadge(dbStatus)}</span>
-          <span>Redis: {getStatusBadge(redisStatus)}</span>
-          <span>Asterisk: {getStatusBadge(asteriskStatus)}</span>
-          <span>WebSocket: {connected ? <Badge status="success" text="Подключен" /> : <Badge status="error" text="Отключен" />}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <Title level={2} style={{ margin: 0 }}><SafetyOutlined style={{ color: '#1890ff', marginRight: 12 }} />Панель управления</Title>
+        <Space size="large" wrap>
+          <Space size="small"><Text type="secondary">API:</Text>{getStatusBadge(serviceStatus.api)}</Space>
+          <Space size="small"><Text type="secondary">БД:</Text>{getStatusBadge(serviceStatus.database)}</Space>
+          <Space size="small"><Text type="secondary">Redis:</Text>{getStatusBadge(serviceStatus.redis)}</Space>
+          <Space size="small"><Text type="secondary">Asterisk:</Text>{getStatusBadge(serviceStatus.asterisk)}</Space>
+          <Space size="small"><Text type="secondary">PBX:</Text>{getStatusBadge(serviceStatus.pbx_registration)}</Space>
+          <a onClick={fetchAllData} style={{ cursor: 'pointer' }}><ReloadOutlined /></a>
         </Space>
       </div>
-
+      {error && <Card style={{ marginBottom: 16, backgroundColor: '#fff2f0' }}><Text type="danger">⚠ {error}</Text></Card>}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Всего каналов"
-              value={stats.totalChannels}
-              prefix={<PhoneOutlined />}
-              suffix={`/ ${stats.totalChannels}`}
-            />
-            <Progress 
-              percent={Math.round((stats.usedChannels / stats.totalChannels) * 100)} 
-              size="small" 
-              status={stats.usedChannels > stats.totalChannels * 0.8 ? 'exception' : 'active'}
-              style={{ marginTop: 8 }}
-            />
-          </Card>
+          <Card><Statistic title="Всего каналов АТС" value={channelStats.total_channels} prefix={<PhoneOutlined />} />
+            <Progress percent={chPct} size="small" status={chPct > 80 ? 'exception' : 'active'} style={{ marginTop: 8 }} format={() => `${channelStats.used_channels} исп.`} /></Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Используется"
-              value={stats.usedChannels}
-              valueStyle={{ color: '#3f8600' }}
-              prefix={<LineChartOutlined />}
-            />
-          </Card>
+          <Card><Statistic title="Свободно" value={channelStats.free_channels} valueStyle={{ color: channelStats.free_channels > 10 ? '#3f8600' : '#cf1322' }} prefix={<CheckCircleOutlined />} />
+            <div style={{ marginTop: 8 }}><Text type="secondary">ГО-ЧС: <Text strong>{channelStats.gochs_channels}</Text></Text></div></Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Входящие звонки"
-              value={stats.inboundCalls}
-              prefix={<CheckCircleOutlined />}
-            />
-          </Card>
+          <Card><Statistic title="Входящие" value={channelStats.inbound_calls} valueStyle={{ color: '#1890ff' }} prefix={<InboxOutlined />} /></Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="Исходящие звонки"
-              value={stats.outboundCalls}
-              prefix={<PhoneOutlined />}
-            />
-          </Card>
+          <Card><Statistic title="Исходящие" value={channelStats.outbound_calls} valueStyle={{ color: '#722ed1' }} prefix={<LineChartOutlined />} /></Card>
         </Col>
       </Row>
-
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={12}>
-          <Card title={<><ThunderboltOutlined /> Активные кампании</>}>
-            {stats.activeCampaigns > 0 ? (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <span>Кампания "Тестовая тревога"</span>
-                  <span>45/100</span>
-                </div>
-                <Progress percent={45} status="active" />
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16 }}>
-                  <span>Кампания "Сбор руководства"</span>
-                  <span>8/15</span>
-                </div>
-                <Progress percent={53} status="active" />
-              </div>
-            ) : (
-              <p style={{ color: '#8c8c8c' }}>Нет активных кампаний</p>
-            )}
+        <Col xs={24} lg={14}>
+          <Card title={<Space><ThunderboltOutlined /><span>Активные кампании</span><Tag color="blue">{activeCampaigns.length}</Tag></Space>}>
+            {activeCampaigns.length > 0 ? activeCampaigns.map(c => (
+              <Card key={c.id} type="inner" size="small" style={{ marginBottom: 12 }} title={<Space><Text strong>{c.name}</Text><Tag color="geekblue">{c.scenario_name}</Tag></Space>}>
+                <Progress percent={c.progress_percent || 0} format={() => `${c.completed_calls}/${c.total_contacts}`} />
+                <Space size="small" style={{ marginTop: 8 }}><Tag color="success">{c.completed_calls} отв.</Tag><Tag color="error">{c.failed_calls} ош.</Tag></Space>
+              </Card>
+            )) : <div style={{ textAlign: 'center', padding: 40 }}><Text type="secondary">Нет активных кампаний</Text></div>}
           </Card>
         </Col>
-        <Col xs={24} lg={12}>
-          <Card title={<><ClockCircleOutlined /> Последние входящие звонки</>}>
-            <Table
-              dataSource={[]}
+        <Col xs={24} lg={10}>
+          <Card title={<Space><ClockCircleOutlined /><span>Последние входящие</span></Space>}>
+            <Table dataSource={recentInboundCalls} rowKey="id" pagination={false} size="small" locale={{ emptyText: 'Нет звонков' }}
               columns={[
-                { title: 'Время', dataIndex: 'time', key: 'time' },
-                { title: 'Номер', dataIndex: 'caller', key: 'caller' },
-                { 
-                  title: 'Статус', 
-                  dataIndex: 'status', 
-                  key: 'status',
-                  render: (status: string) => {
-                    const colors: Record<string, string> = {
-                      answered: 'success',
-                      missed: 'error',
-                      recorded: 'processing',
-                    };
-                    return <Tag color={colors[status] || 'default'}>{status}</Tag>;
-                  },
-                },
-              ]}
-              pagination={false}
-              size="small"
-              locale={{ emptyText: 'Нет входящих звонков' }}
-            />
+                { title: 'Время', dataIndex: 'time', key: 'time', width: 60, render: (t: string) => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) },
+                { title: 'Номер', dataIndex: 'caller_number', key: 'caller', width: 90 },
+                { title: 'Длит.', dataIndex: 'duration', key: 'dur', width: 50, render: (d: number) => `${Math.floor(d/60)}:${(d%60).toString().padStart(2,'0')}` },
+                { title: 'Статус', dataIndex: 'status', key: 'st', render: (s: string) => getCallStatusTag(s) },
+              ]} />
           </Card>
         </Col>
       </Row>
+      <Row style={{ marginTop: 16 }}><Col span={24}><Card size="small" style={{ backgroundColor: '#fafafa' }}>
+        <Space split={<span style={{ color: '#d9d9d9' }}>|</span>} size="large" wrap>
+          <Text type="secondary">Время: <Text strong>{new Date().toLocaleString('ru-RU')}</Text></Text>
+          <Text type="secondary">Режим: <Tag color="green">Production</Tag></Text>
+          <Text type="secondary">Загрузка: <Text strong>{chPct}%</Text></Text>
+        </Space>
+      </Card></Col></Row>
     </div>
   );
 };
 
 export default Dashboard;
-EOF
+DASHBOARDEOF
 
     # Создание остальных страниц (заглушки)
     for page in Contacts Groups Scenarios Campaigns Inbound Playbooks Users Settings Audit; do
@@ -935,6 +956,78 @@ EOF
 create_services() {
     log_info "Создание сервисов..."
     
+        # settingsService.ts
+    cat > "$INSTALL_DIR/frontend/src/services/settingsService.ts" << 'EOF'
+import api from './api';
+
+export const settingsService = {
+  async getPBXSettings() {
+    const response = await api.get('/settings/pbx');
+    return response.data;
+  },
+  
+  async updatePBXSettings(data: any) {
+    const response = await api.put('/settings/pbx', data);
+    return response.data;
+  },
+  
+  async getSystemSettings() {
+    const response = await api.get('/settings/system');
+    return response.data;
+  },
+  
+  async updateSystemSettings(data: any) {
+    const response = await api.put('/settings/system', data);
+    return response.data;
+  },
+  
+  async getNotifications() {
+    const response = await api.get('/settings/notifications');
+    return response.data;
+  },
+  
+  async updateNotifications(data: any) {
+    const response = await api.put('/settings/notifications', data);
+    return response.data;
+  },
+  
+  async testPBXConnection(data: any) {
+    const response = await api.post('/settings/pbx/test', data);
+    return response.data;
+  },
+  
+  async applyPBXSettings() {
+    const response = await api.post('/settings/pbx/apply');
+    return response.data;
+  },
+};
+EOF
+
+    # auditService.ts
+    cat > "$INSTALL_DIR/frontend/src/services/auditService.ts" << 'EOF'
+import api from './api';
+
+export const auditService = {
+  async getAuditLogs(params?: any) {
+    const response = await api.get('/audit/logs', { params });
+    return response.data;
+  },
+  
+  async getAuditStats(days: number = 30) {
+    const response = await api.get('/audit/stats', { params: { days } });
+    return response.data;
+  },
+  
+  async exportAudit(params?: any) {
+    const response = await api.get('/audit/export', { 
+      params,
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+};
+
+
     # api.ts
     cat > "$INSTALL_DIR/frontend/src/services/api.ts" << 'EOF'
 import axios from 'axios';
@@ -1072,6 +1165,11 @@ export const campaignService = {
     const response = await api.get(`/campaigns/${id}/status`);
     return response.data;
   },
+  
+  async getActiveCampaigns() {
+    const response = await fetch('/api/v1/campaigns/active');
+    return response.json();
+  },
 };
 EOF
 
@@ -1094,6 +1192,18 @@ export const monitoringService = {
     const response = await api.get('/monitoring/calls');
     return response.data;
   },
+
+  async getChannelStats() {
+  const response = await api.get('/monitoring/channels/stats');
+  return response.data;
+},
+
+async getRecentInboundCalls(limit: number = 10) {
+  const response = await api.get('/monitoring/inbound/recent', { 
+    params: { limit } 
+  });
+  return response.data;
+},
   
   async getSystemInfo() {
     const response = await api.get('/monitoring/system');
