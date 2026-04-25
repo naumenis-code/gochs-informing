@@ -45,8 +45,8 @@ install() {
     
     # Настройка локали
     log_info "Настройка локали..."
-    locale-gen ru_RU.UTF-8
-    update-locale LANG=ru_RU.UTF-8
+    /usr/sbin/locale-gen ru_RU.UTF-8
+    /usr/sbin/update-locale LANG=ru_RU.UTF-8
     
     # Настройка часового пояса
     log_info "Настройка часового пояса..."
