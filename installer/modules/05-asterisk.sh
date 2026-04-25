@@ -339,13 +339,13 @@ install_asterisk() {
     
     # Создание пользователя asterisk
     if ! id -u asterisk &>/dev/null; then
-        useradd -r -d /var/lib/asterisk -s /sbin/nologin asterisk
+        /usr/sbin/useradd -r -d /var/lib/asterisk -s /sbin/nologin asterisk
         log_info "Пользователь asterisk создан"
     fi
     
     # Добавление пользователя в группы
-    usermod -aG audio asterisk 2>/dev/null || true
-    usermod -aG "$GOCHS_GROUP" asterisk 2>/dev/null || true
+    /usr/sbin/usermod -aG audio asterisk 2>/dev/null || true
+    /usr/sbin/usermod -aG "$GOCHS_GROUP" asterisk 2>/dev/null || true
     
     # Установка прав
     chown -R asterisk:asterisk /var/lib/asterisk
