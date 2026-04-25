@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
 from sqlalchemy import (
+    Float,
     Column, String, Boolean, DateTime, Text, Integer, 
     Index, UniqueConstraint, ForeignKey, Float, Enum as SAEnum
 )
