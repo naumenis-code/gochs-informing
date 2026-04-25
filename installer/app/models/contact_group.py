@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
 from sqlalchemy import (
+    Integer, Boolean, Text,
     Column, String, Boolean, DateTime, Text, Integer,
     Index, UniqueConstraint, CheckConstraint, ForeignKey
 )
