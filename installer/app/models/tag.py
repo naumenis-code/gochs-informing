@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean, Integer, ForeignKey,
     Column, String, DateTime, Index, UniqueConstraint, CheckConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
