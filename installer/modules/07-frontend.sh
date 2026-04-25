@@ -748,7 +748,6 @@ interface ServiceStatus {
   database: 'online' | 'offline';
   redis: 'online' | 'offline';
   asterisk: 'online' | 'offline';
-  pbx_registration: 'online' | 'offline';
 }
 
 interface ActiveCampaign {
@@ -783,7 +782,6 @@ const Dashboard: React.FC = () => {
   });
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
     api: 'offline', database: 'offline', redis: 'offline',
-    asterisk: 'offline', pbx_registration: 'offline',
   });
   const [activeCampaigns, setActiveCampaigns] = useState<ActiveCampaign[]>([]);
   const [recentInboundCalls, setRecentInboundCalls] = useState<RecentCall[]>([]);
@@ -798,7 +796,6 @@ const Dashboard: React.FC = () => {
         database: healthData.database === true ? 'online' : 'offline',
         redis: healthData.redis === true ? 'online' : 'offline',
         asterisk: healthData.asterisk === true ? 'online' : 'offline',
-        pbx_registration: healthData.pbx_registration === true ? 'online' : 'offline',
       });
       try {
         const statsRes = await fetch('/api/v1/monitoring/channels/stats');
@@ -860,7 +857,6 @@ const Dashboard: React.FC = () => {
           <Space size="small"><Text type="secondary">БД:</Text>{getStatusBadge(serviceStatus.database)}</Space>
           <Space size="small"><Text type="secondary">Redis:</Text>{getStatusBadge(serviceStatus.redis)}</Space>
           <Space size="small"><Text type="secondary">Asterisk:</Text>{getStatusBadge(serviceStatus.asterisk)}</Space>
-          <Space size="small"><Text type="secondary">PBX:</Text>{getStatusBadge(serviceStatus.pbx_registration)}</Space>
           <a onClick={fetchAllData} style={{ cursor: 'pointer' }}><ReloadOutlined /></a>
         </Space>
       </div>
