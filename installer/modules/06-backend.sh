@@ -904,7 +904,17 @@ EOF
 
     # Создание __init__.py для endpoints
     touch "$INSTALL_DIR/app/api/v1/endpoints/__init__.py"
-    
+
+        # Копирование monitoring.py из installer (если есть)
+    log_info "Копирование monitoring.py из installer..."
+    if [[ -f "${SCRIPT_DIR}/app/api/v1/endpoints/monitoring.py" ]]; then
+        cp "${SCRIPT_DIR}/app/api/v1/endpoints/monitoring.py" "$INSTALL_DIR/app/api/v1/endpoints/"
+        chown "$GOCHS_USER:$GOCHS_GROUP" "$INSTALL_DIR/app/api/v1/endpoints/monitoring.py" 2>/dev/null || true
+        log_info "✓ monitoring.py скопирован из installer"
+    else
+        log_warn "monitoring.py не найден в installer/app/api/v1/endpoints/"
+    fi
+     
     log_info "API эндпоинты созданы"
 }
 
