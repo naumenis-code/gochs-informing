@@ -781,7 +781,7 @@ const Dashboard: React.FC = () => {
     gochs_channels: 0, inbound_calls: 0, outbound_calls: 0,
   });
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
-    api: 'offline', database: 'offline', redis: 'offline',
+    api: 'offline', database: 'offline', redis: 'offline', asterisk: 'offline',
   });
   const [activeCampaigns, setActiveCampaigns] = useState<ActiveCampaign[]>([]);
   const [recentInboundCalls, setRecentInboundCalls] = useState<RecentCall[]>([]);
@@ -951,80 +951,9 @@ EOF
 
 create_services() {
     log_info "Создание сервисов..."
-    
-        # settingsService.ts
-    cat > "$INSTALL_DIR/frontend/src/services/settingsService.ts" << 'EOF'
-import api from './api';
-
-export const settingsService = {
-  async getPBXSettings() {
-    const response = await api.get('/settings/pbx');
-    return response.data;
-  },
-  
-  async updatePBXSettings(data: any) {
-    const response = await api.put('/settings/pbx', data);
-    return response.data;
-  },
-  
-  async getSystemSettings() {
-    const response = await api.get('/settings/system');
-    return response.data;
-  },
-  
-  async updateSystemSettings(data: any) {
-    const response = await api.put('/settings/system', data);
-    return response.data;
-  },
-  
-  async getNotifications() {
-    const response = await api.get('/settings/notifications');
-    return response.data;
-  },
-  
-  async updateNotifications(data: any) {
-    const response = await api.put('/settings/notifications', data);
-    return response.data;
-  },
-  
-  async testPBXConnection(data: any) {
-    const response = await api.post('/settings/pbx/test', data);
-    return response.data;
-  },
-  
-  async applyPBXSettings() {
-    const response = await api.post('/settings/pbx/apply');
-    return response.data;
-  },
-};
-EOF
-
-    # auditService.ts
-    cat > "$INSTALL_DIR/frontend/src/services/auditService.ts" << 'EOF'
-import api from './api';
-
-export const auditService = {
-  async getAuditLogs(params?: any) {
-    const response = await api.get('/audit/logs', { params });
-    return response.data;
-  },
-  
-  async getAuditStats(days: number = 30) {
-    const response = await api.get('/audit/stats', { params: { days } });
-    return response.data;
-  },
-  
-  async exportAudit(params?: any) {
-    const response = await api.get('/audit/export', { 
-      params,
-      responseType: 'blob'
-    });
-    return response.data;
-  },
-};
 
 
-    # api.ts
+        # api.ts
     cat > "$INSTALL_DIR/frontend/src/services/api.ts" << 'EOF'
 import axios from 'axios';
 import { message } from 'antd';
@@ -1116,6 +1045,80 @@ export const authService = {
   },
 };
 EOF
+
+    
+        # settingsService.ts
+    cat > "$INSTALL_DIR/frontend/src/services/settingsService.ts" << 'EOF'
+import api from './api';
+
+export const settingsService = {
+  async getPBXSettings() {
+    const response = await api.get('/settings/pbx');
+    return response.data;
+  },
+  
+  async updatePBXSettings(data: any) {
+    const response = await api.put('/settings/pbx', data);
+    return response.data;
+  },
+  
+  async getSystemSettings() {
+    const response = await api.get('/settings/system');
+    return response.data;
+  },
+  
+  async updateSystemSettings(data: any) {
+    const response = await api.put('/settings/system', data);
+    return response.data;
+  },
+  
+  async getNotifications() {
+    const response = await api.get('/settings/notifications');
+    return response.data;
+  },
+  
+  async updateNotifications(data: any) {
+    const response = await api.put('/settings/notifications', data);
+    return response.data;
+  },
+  
+  async testPBXConnection(data: any) {
+    const response = await api.post('/settings/pbx/test', data);
+    return response.data;
+  },
+  
+  async applyPBXSettings() {
+    const response = await api.post('/settings/pbx/apply');
+    return response.data;
+  },
+};
+EOF
+
+    # auditService.ts
+    cat > "$INSTALL_DIR/frontend/src/services/auditService.ts" << 'EOF'
+import api from './api';
+
+export const auditService = {
+  async getAuditLogs(params?: any) {
+    const response = await api.get('/audit/logs', { params });
+    return response.data;
+  },
+  
+  async getAuditStats(days: number = 30) {
+    const response = await api.get('/audit/stats', { params: { days } });
+    return response.data;
+  },
+  
+  async exportAudit(params?: any) {
+    const response = await api.get('/audit/export', { 
+      params,
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+};
+
+
 
     # campaignService.ts
     cat > "$INSTALL_DIR/frontend/src/services/campaignService.ts" << 'EOF'
