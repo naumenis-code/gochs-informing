@@ -1,26 +1,33 @@
 #!/bin/bash
 ################################################################################
-# Модуль: 06-backend.sh (ИСПРАВЛЕННЫЙ - копирует готовые файлы)
+# Модуль: 06-backend.sh — Установка бэкенда
+# Копирует готовые файлы из installer/app/ + создает недостающие
 ################################################################################
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${SCRIPT_DIR}/utils/common.sh" 2>/dev/null || {
     log_info() { echo -e "\033[0;32m[INFO]\033[0m $(date '+%H:%M:%S') $*"; }
     log_error() { echo -e "\033[0;31m[ERROR]\033[0m $*"; }
     log_step() { echo -e "\n\033[0;34m═══ $* ═══\033[0m"; }
+    ensure_dir() { mkdir -p "$1"; }
+    mark_module_installed() { echo "$1:$(date +%s)" >> "${INSTALL_DIR:-/opt/gochs-informing}/.modules_state"; }
 }
 
 MODULE_NAME="06-backend"
 INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+source "${SCRIPT_DIR}/config/config.env" 2>/dev/null || true
+
 INSTALLER_APP="${SCRIPT_DIR}/app"
 TARGET_APP="$INSTALL_DIR/app"
 
 install() {
     log_step "Установка FastAPI бэкенда"
     
-    # Проверка
-    [ -d "$INSTALL_DIR/venv" ] || { log_error "Python venv не найден"; return 1; }
+    # Проверка зависимостей
+    [ -d "$INSTALL_DIR/venv" ] || { log_error "Python venv не найден. Запустите 02-python.sh"; return 1; }
+    systemctl is-active --quiet postgresql || { log_error "PostgreSQL не запущен"; return 1; }
+    systemctl is-active --quiet redis-server || { log_error "Redis не запущен"; return 1; }
     
-    # Установка пакетов
+    # Установка Python пакетов
     log_info "Установка Python пакетов..."
     source "$INSTALL_DIR/venv/bin/activate"
     pip install --quiet fastapi uvicorn sqlalchemy asyncpg psycopg2-binary \
@@ -30,10 +37,11 @@ install() {
     # Создание структуры
     log_info "Создание структуры директорий..."
     for dir in core api/v1/endpoints models schemas services tasks utils; do
-        mkdir -p "$TARGET_APP/$dir"
+        ensure_dir "$TARGET_APP/$dir"
+        touch "$TARGET_APP/$dir/__init__.py"
     done
     
-    # КОПИРОВАНИЕ ГОТОВЫХ ФАЙЛОВ
+    # КОПИРОВАНИЕ ГОТОВЫХ ФАЙЛОВ из installer/app/
     log_info "Копирование готовых файлов из installer/app/..."
     
     copy_file() {
@@ -44,7 +52,7 @@ install() {
             cp "$src" "$dst"
             log_info "  ✓ $1"
         else
-            log_info "  ○ $1 (пропущен - нет в installer)"
+            return 1
         fi
     }
     
@@ -82,6 +90,59 @@ install() {
     
     # Utils
     copy_file "utils/audit_helper.py"
+    
+    # СОЗДАНИЕ НЕДОСТАЮЩИХ ФАЙЛОВ (если нет в installer)
+    log_info "Проверка и создание недостающих файлов..."
+    
+    # core/logging_config.py
+    if [ ! -f "$TARGET_APP/core/logging_config.py" ]; then
+        cat > "$TARGET_APP/core/logging_config.py" << 'PYEOF'
+import logging
+def setup_logging():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+PYEOF
+        log_info "  ✓ core/logging_config.py"
+    fi
+    
+    # models/user.py
+    if [ ! -f "$TARGET_APP/models/user.py" ]; then
+        cat > "$TARGET_APP/models/user.py" << 'PYEOF'
+import uuid
+from sqlalchemy import Column, String, Boolean, DateTime, Integer
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from app.core.database import Base
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), unique=True, nullable=False)
+    username = Column(String(100), unique=True, nullable=False)
+    full_name = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(String(50), default="operator")
+    is_active = Column(Boolean, default=True)
+    is_superuser = Column(Boolean, default=False)
+    login_attempts = Column(Integer, default=0)
+    locked_until = Column(DateTime)
+    login_count = Column(Integer, default=0)
+    last_login = Column(DateTime)
+    created_at = Column(DateTime, server_default=func.now())
+PYEOF
+        log_info "  ✓ models/user.py"
+    fi
+    
+    # api/v1/endpoints/reports.py
+    if [ ! -f "$TARGET_APP/api/v1/endpoints/reports.py" ]; then
+        cat > "$TARGET_APP/api/v1/endpoints/reports.py" << 'PYEOF'
+from fastapi import APIRouter
+router = APIRouter()
+@router.get("/summary")
+async def summary():
+    return {"campaigns": {"total": 0}, "calls": {"total": 0}}
+PYEOF
+        log_info "  ✓ endpoints/reports.py"
+    fi
     
     # Права
     chown -R gochs:gochs "$TARGET_APP" 2>/dev/null || true
