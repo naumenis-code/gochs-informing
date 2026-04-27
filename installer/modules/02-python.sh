@@ -422,6 +422,7 @@ EOF
     chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/venv"
     chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/models"
     chown "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/config"
+    chown "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/.env"
     chmod 600 "$INSTALL_DIR/config/config.yaml"
     chmod 600 "$INSTALL_DIR/.env"
     
