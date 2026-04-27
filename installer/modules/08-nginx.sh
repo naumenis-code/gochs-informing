@@ -3,7 +3,8 @@
 ################################################################################
 # Модуль: 08-nginx.sh
 # Назначение: Установка и настройка Nginx веб-сервера
-# Версия: 1.0.6 (полная исправленная версия)
+# Версия: 1.0.7 (полная исправленная версия)
+# ИСПРАВЛЕНИЯ: проверка сборки фронтенда, обработка ошибок, мягкая конфигурация
 ################################################################################
 
 # Определение путей
@@ -66,13 +67,6 @@ if ! type log_info &>/dev/null; then
     generate_password() {
         openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "NginxPass$(date +%s)"
     }
-    check_port_free() {
-        local port="$1"
-        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
-            return 1
-        fi
-        return 0
-    }
 fi
 
 MODULE_NAME="08-nginx"
@@ -98,6 +92,22 @@ GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 # Переменные для отслеживания SSL
 SSL_SUCCESS=false
 
+# ============================================================================
+# ИСПРАВЛЕНИЕ 1: Определение директории фронтенда
+# ============================================================================
+detect_frontend_build() {
+    # Ищем собранный фронтенд
+    if [[ -d "$INSTALL_DIR/frontend/build" ]] && [[ -f "$INSTALL_DIR/frontend/build/index.html" ]]; then
+        echo "$INSTALL_DIR/frontend/build"
+    elif [[ -d "$INSTALL_DIR/frontend/dist" ]] && [[ -f "$INSTALL_DIR/frontend/dist/index.html" ]]; then
+        echo "$INSTALL_DIR/frontend/dist"
+    else
+        echo ""
+    fi
+}
+
+FRONTEND_BUILD_DIR=$(detect_frontend_build)
+
 install() {
     log_step "Установка и настройка Nginx"
     
@@ -117,6 +127,7 @@ install() {
             ;;
         none)
             log_info "SSL не настраивается (режим: $SSL_MODE)"
+            enable_http_only_config
             ;;
         *)
             log_warn "Неизвестный режим SSL: $SSL_MODE, создаем самоподписанный"
@@ -127,7 +138,7 @@ install() {
     
     optimize_nginx
     setup_monitoring
-    create_test_frontend
+    ensure_frontend_files
     start_nginx
     create_management_scripts
     setup_fail2ban
@@ -135,18 +146,42 @@ install() {
     
     mark_module_installed "$MODULE_NAME"
     
-    log_info "Модуль ${MODULE_NAME} успешно установлен"
+    # =========================================================================
+    # ИСПРАВЛЕНИЕ 2: Информация о доступе с проверкой статуса
+    # =========================================================================
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}  ДОСТУП К СИСТЕМЕ:${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "  ${WHITE}Web интерфейс:${NC}     ${GREEN}https://$DOMAIN_OR_IP${NC}"
-    echo -e "  ${WHITE}API документация:${NC}  ${GREEN}https://$DOMAIN_OR_IP/docs${NC}"
-    echo -e "  ${WHITE}Health check:${NC}     ${GREEN}https://$DOMAIN_OR_IP/health${NC}"
+    
+    local protocol="http"
+    [[ "$SSL_MODE" != "none" ]] && protocol="https"
+    
+    echo -e "  ${WHITE}Web интерфейс:${NC}     ${GREEN}${protocol}://$DOMAIN_OR_IP${NC}"
+    echo -e "  ${WHITE}API документация:${NC}  ${GREEN}${protocol}://$DOMAIN_OR_IP/docs${NC}"
+    echo -e "  ${WHITE}Health check:${NC}     ${GREEN}${protocol}://$DOMAIN_OR_IP/health${NC}"
     echo ""
-    echo -e "  ${YELLOW}⚠️  Используется самоподписанный SSL сертификат${NC}"
-    echo -e "  ${YELLOW}   Примите предупреждение в браузере${NC}"
+    
+    if [[ "$SSL_MODE" == "selfsigned" ]]; then
+        echo -e "  ${YELLOW}⚠️  Используется самоподписанный SSL сертификат${NC}"
+        echo -e "  ${YELLOW}   Примите предупреждение в браузере${NC}"
+    fi
+    
+    # Проверка статуса API
+    if curl -s http://localhost:8000/health 2>/dev/null | grep -q "status"; then
+        echo -e "  ${GREEN}✓ API доступен${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ API может быть недоступен${NC}"
+    fi
+    
+    # Проверка наличия фронтенда
+    if [[ -n "$FRONTEND_BUILD_DIR" ]]; then
+        echo -e "  ${GREEN}✓ Фронтенд найден: $FRONTEND_BUILD_DIR${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ Фронтенд не собран. Используется тестовая страница.${NC}"
+        FRONTEND_BUILD_DIR="$INSTALL_DIR/frontend/build"
+    fi
     echo ""
     
     return 0
@@ -168,14 +203,6 @@ check_dependencies() {
     # Проверка наличия curl
     if ! command -v curl &>/dev/null; then
         apt-get install -y curl 2>/dev/null || true
-    fi
-    
-    # Проверка портов
-    if ! check_port_free "$HTTP_PORT"; then
-        log_warn "Порт $HTTP_PORT уже используется"
-    fi
-    if ! check_port_free "$HTTPS_PORT"; then
-        log_warn "Порт $HTTPS_PORT уже используется"
     fi
     
     log_info "Зависимости проверены"
@@ -218,10 +245,15 @@ create_directories() {
     ensure_dir "$INSTALL_DIR/recordings"
     ensure_dir "$INSTALL_DIR/scripts"
     
-    # Очистка старых конфигов - ИСПРАВЛЕНИЕ
-    rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
-    rm -f /etc/nginx/conf.d/*.conf 2>/dev/null || true
-    rm -f /etc/nginx/sites-available/* 2>/dev/null || true
+    # ИСПРАВЛЕНИЕ: очистка старых конфигов с бэкапом
+    if [[ -d /etc/nginx/sites-enabled ]] && [[ -n "$(ls -A /etc/nginx/sites-enabled 2>/dev/null)" ]]; then
+        backup_file "/etc/nginx/sites-enabled"
+        rm -f /etc/nginx/sites-enabled/* 2>/dev/null || true
+    fi
+    if [[ -d /etc/nginx/conf.d ]] && [[ -f /etc/nginx/conf.d/default.conf ]]; then
+        backup_file "/etc/nginx/conf.d/default.conf"
+        rm -f /etc/nginx/conf.d/default.conf 2>/dev/null || true
+    fi
     
     # Установка прав
     chown -R www-data:www-data /var/log/nginx 2>/dev/null || true
@@ -391,14 +423,21 @@ create_self_signed_cert() {
 enable_https_config() {
     log_info "Создание HTTPS конфигурации..."
     
-    # ИСПРАВЛЕНИЕ: Правильная конфигурация с редиректом и прокси
-    cat > "/etc/nginx/conf.d/gochs.conf" << 'EOF'
+    # ИСПРАВЛЕНИЕ: Проверка существования фронтенда
+    local frontend_root="$INSTALL_DIR/frontend/build"
+    if [[ ! -d "$frontend_root" ]] || [[ ! -f "$frontend_root/index.html" ]]; then
+        log_warn "Фронтенд не найден в $frontend_root, будет использоваться тестовая страница"
+        frontend_root="$INSTALL_DIR/frontend/build"
+        ensure_dir "$frontend_root"
+    fi
+    
+    cat > "/etc/nginx/conf.d/gochs.conf" << EOF
 # HTTP -> HTTPS редирект
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-    return 301 https://$host$request_uri;
+    return 301 https://\$host\$request_uri;
 }
 
 # HTTPS сервер
@@ -412,54 +451,125 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
     
-    root /opt/gochs-informing/frontend/build;
+    root $frontend_root;
+    index index.html;
+    
+    # API прокси
+    location /api {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }
+    
+    location /health {
+        proxy_pass http://127.0.0.1:8000/health;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+    }
+    
+    location /docs {
+        proxy_pass http://127.0.0.1:8000/docs;
+        proxy_set_header Host \$host;
+    }
+    
+    location /openapi.json {
+        proxy_pass http://127.0.0.1:8000/openapi.json;
+        proxy_set_header Host \$host;
+    }
+    
+    # WebSocket
+    location /ws {
+        proxy_pass http://127.0.0.1:8000/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 86400;
+    }
+    
+    # Статические файлы
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+    
+    # Кэширование статики
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+}
+EOF
+
+    if /usr/sbin/nginx -t 2>&1; then
+        log_info "HTTPS конфигурация создана и проверена"
+    else
+        log_error "Ошибка в HTTPS конфигурации"
+        return 1
+    fi
+}
+
+enable_http_only_config() {
+    log_info "Создание HTTP-only конфигурации..."
+    
+    local frontend_root="$INSTALL_DIR/frontend/build"
+    if [[ ! -d "$frontend_root" ]] || [[ ! -f "$frontend_root/index.html" ]]; then
+        log_warn "Фронтенд не найден в $frontend_root, будет использоваться тестовая страница"
+        ensure_dir "$frontend_root"
+    fi
+    
+    cat > "/etc/nginx/conf.d/gochs.conf" << EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    
+    root $frontend_root;
     index index.html;
     
     location /api {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
     
     location /health {
         proxy_pass http://127.0.0.1:8000/health;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host \$host;
     }
     
     location /docs {
         proxy_pass http://127.0.0.1:8000/docs;
-        proxy_set_header Host $host;
+        proxy_set_header Host \$host;
     }
     
-    # WebSocket - ВАЖНО: должен быть ДО location /
     location /ws {
         proxy_pass http://127.0.0.1:8000/ws;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host \$host;
         proxy_read_timeout 86400;
     }
     
-    # Статические файлы - ВАЖНО: должен быть ПОСЛЕДНИМ
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
     }
 }
 EOF
 
-    # Замена переменных в конфиге
-    sed -i "s|/opt/gochs-informing|$INSTALL_DIR|g" /etc/nginx/conf.d/gochs.conf
-    
     if /usr/sbin/nginx -t 2>&1; then
-        log_info "HTTPS конфигурация создана и проверена"
+        log_info "HTTP конфигурация создана и проверена"
     else
-        log_error "Ошибка в HTTPS конфигурации"
+        log_error "Ошибка в HTTP конфигурации"
         return 1
     fi
 }
@@ -473,8 +583,10 @@ nginx soft nofile 65535
 nginx hard nofile 65535
 EOF
 
-    # Оптимизация sysctl
-    cat >> /etc/sysctl.d/99-nginx.conf << EOF
+    # Оптимизация sysctl (добавляем только если ещё нет)
+    if ! grep -q "nginx optimizations" /etc/sysctl.d/99-nginx.conf 2>/dev/null; then
+        cat >> /etc/sysctl.d/99-nginx.conf << EOF
+
 # Nginx optimizations
 net.core.somaxconn = 65535
 net.core.netdev_max_backlog = 65535
@@ -485,6 +597,7 @@ net.ipv4.tcp_keepalive_time = 600
 net.ipv4.tcp_keepalive_intvl = 15
 net.ipv4.tcp_keepalive_probes = 3
 EOF
+    fi
 
     /usr/sbin/sysctl -p /etc/sysctl.d/99-nginx.conf 2>/dev/null || true
     
@@ -526,64 +639,41 @@ EOF
     log_info "Мониторинг Nginx настроен"
 }
 
-setup_fail2ban() {
-    log_info "Настройка fail2ban для Nginx..."
+# ============================================================================
+# ИСПРАВЛЕНИЕ 3: Проверка и создание файлов фронтенда
+# ============================================================================
+ensure_frontend_files() {
+    log_info "Проверка файлов фронтенда..."
     
-    if ! command -v fail2ban-server &>/dev/null; then
-        apt-get install -y fail2ban 2>/dev/null || true
+    local frontend_root="$INSTALL_DIR/frontend/build"
+    
+    # Проверяем наличие собранного фронтенда
+    if [[ -f "$frontend_root/index.html" ]]; then
+        log_info "✓ Собранный фронтенд найден: $frontend_root"
+        chown -R www-data:www-data "$frontend_root" 2>/dev/null || true
+        chmod -R 755 "$frontend_root"
+        return 0
     fi
     
-    if [[ -d /etc/fail2ban ]]; then
-        cat > /etc/fail2ban/jail.d/nginx.local << 'EOF'
-[nginx-http-auth]
-enabled = true
-port = http,https
-logpath = /var/log/nginx/error.log
-maxretry = 5
-bantime = 3600
-
-[nginx-botsearch]
-enabled = true
-port = http,https
-logpath = /var/log/nginx/access.log
-maxretry = 5
-bantime = 3600
-EOF
-
-        systemctl restart fail2ban 2>/dev/null || true
-        log_info "fail2ban настроен для Nginx"
+    # Проверяем dist
+    if [[ -f "$INSTALL_DIR/frontend/dist/index.html" ]]; then
+        log_info "✓ Собранный фронтенд найден в dist"
+        frontend_root="$INSTALL_DIR/frontend/dist"
+        chown -R www-data:www-data "$frontend_root" 2>/dev/null || true
+        chmod -R 755 "$frontend_root"
+        return 0
     fi
-}
-
-setup_logrotate() {
-    log_info "Настройка ротации логов Nginx..."
     
-    cat > /etc/logrotate.d/nginx-gochs << EOF
-/var/log/nginx/*.log {
-    daily
-    missingok
-    rotate 30
-    compress
-    delaycompress
-    notifempty
-    create 640 www-data adm
-    sharedscripts
-    postrotate
-        if [ -f /var/run/nginx.pid ]; then
-            kill -USR1 \$(cat /var/run/nginx.pid)
-        fi
-    endscript
-}
-EOF
-
-    log_info "Ротация логов настроена"
+    # Создаем тестовую страницу
+    log_warn "⚠ Собранный фронтенд не найден, создаю тестовую страницу..."
+    create_test_frontend
 }
 
 create_test_frontend() {
-    log_info "Создание тестового фронтенда..."
+    local frontend_root="$INSTALL_DIR/frontend/build"
+    ensure_dir "$frontend_root"
     
-    if [[ ! -f "$INSTALL_DIR/frontend/build/index.html" ]]; then
-        cat > "$INSTALL_DIR/frontend/build/index.html" << 'EOF'
+    cat > "$frontend_root/index.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -673,9 +763,7 @@ create_test_frontend() {
             padding: 8px 0;
             border-bottom: 1px solid #ddd;
         }
-        .info-item:last-child {
-            border-bottom: none;
-        }
+        .info-item:last-child { border-bottom: none; }
         .info-label {
             font-weight: 500;
             color: #555;
@@ -691,13 +779,8 @@ create_test_frontend() {
             color: #999;
             font-size: 12px;
         }
-        a {
-            color: #e94560;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
+        a { color: #e94560; text-decoration: none; }
+        a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -793,19 +876,69 @@ create_test_frontend() {
 </body>
 </html>
 EOF
-        log_info "Тестовый фронтенд создан"
-    else
-        log_info "Фронтенд уже существует"
+
+    chown -R www-data:www-data "$frontend_root" 2>/dev/null || true
+    chmod -R 755 "$frontend_root"
+    log_info "Тестовый фронтенд создан"
+}
+
+setup_fail2ban() {
+    log_info "Настройка fail2ban для Nginx..."
+    
+    if ! command -v fail2ban-server &>/dev/null; then
+        apt-get install -y fail2ban 2>/dev/null || true
     fi
     
-    chown -R www-data:www-data "$INSTALL_DIR/frontend/build" 2>/dev/null || true
-    chmod -R 755 "$INSTALL_DIR/frontend/build"
+    if [[ -d /etc/fail2ban ]]; then
+        cat > /etc/fail2ban/jail.d/nginx.local << 'EOF'
+[nginx-http-auth]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/error.log
+maxretry = 5
+bantime = 3600
+
+[nginx-botsearch]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/access.log
+maxretry = 5
+bantime = 3600
+EOF
+
+        systemctl restart fail2ban 2>/dev/null || true
+        log_info "fail2ban настроен для Nginx"
+    fi
+}
+
+setup_logrotate() {
+    log_info "Настройка ротации логов Nginx..."
+    
+    cat > /etc/logrotate.d/nginx-gochs << EOF
+/var/log/nginx/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    create 640 www-data adm
+    sharedscripts
+    postrotate
+        if [ -f /var/run/nginx.pid ]; then
+            kill -USR1 \$(cat /var/run/nginx.pid)
+        fi
+    endscript
+}
+EOF
+
+    log_info "Ротация логов настроена"
 }
 
 start_nginx() {
     log_info "Запуск Nginx..."
     
-    # ИСПРАВЛЕНИЕ: Полная остановка перед запуском
+    # Полная остановка перед запуском
     systemctl stop nginx 2>/dev/null || true
     pkill -f nginx 2>/dev/null || true
     sleep 2
@@ -816,10 +949,12 @@ start_nginx() {
     if wait_for_service "nginx" 10; then
         log_info "Nginx успешно запущен"
         
-        # Проверка HTTPS
+        # Проверка доступа
         sleep 2
         if curl -sk https://localhost/health 2>/dev/null | grep -q "status"; then
             log_info "HTTPS и API прокси работают корректно"
+        elif curl -s http://localhost/health 2>/dev/null | grep -q "status"; then
+            log_info "HTTP и API прокси работают корректно"
         fi
     else
         log_error "Ошибка запуска Nginx"
@@ -840,9 +975,6 @@ systemctl status nginx --no-pager
 echo -e "\n=== Порты ==="
 netstat -tlnp 2>/dev/null | grep nginx
 
-echo -e "\n=== Тест HTTP -> HTTPS ==="
-curl -sI http://localhost/ 2>/dev/null | head -3
-
 echo -e "\n=== Тест HTTPS API ==="
 curl -sk https://localhost/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "API недоступен"
 
@@ -856,7 +988,7 @@ EOF
 if [[ "$1" == "error" ]]; then
     tail -f /var/log/nginx/error.log
 elif [[ "$1" == "access" ]]; then
-    tail -f /var/log/nginx/gochs-access.log 2>/dev/null || tail -f /var/log/nginx/access.log
+    tail -f /var/log/nginx/access.log
 else
     echo "Использование: $0 {error|access}"
 fi
@@ -875,14 +1007,6 @@ EOF
 #!/bin/bash
 echo "Тестирование Nginx..."
 
-echo -n "HTTP (редирект): "
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/ 2>/dev/null)
-if [[ "$HTTP_CODE" == "301" ]] || [[ "$HTTP_CODE" == "302" ]]; then
-    echo "OK ($HTTP_CODE)"
-else
-    echo "FAILED ($HTTP_CODE)"
-fi
-
 echo -n "HTTPS: "
 HTTPS_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/ 2>/dev/null)
 if [[ "$HTTPS_CODE" == "200" ]]; then
@@ -890,6 +1014,10 @@ if [[ "$HTTPS_CODE" == "200" ]]; then
 else
     echo "FAILED ($HTTPS_CODE)"
 fi
+
+echo -n "HTTP: "
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/ 2>/dev/null)
+echo "$HTTP_CODE"
 
 echo -n "API health: "
 if curl -sk https://localhost/health 2>/dev/null | grep -q "status"; then
@@ -980,15 +1108,18 @@ check_status() {
     
     if curl -sk https://localhost/health 2>/dev/null | grep -q "status"; then
         log_info "✓ API прокси: работает"
+    elif curl -s http://localhost/health 2>/dev/null | grep -q "status"; then
+        log_info "✓ API прокси (HTTP): работает"
     else
         log_warn "✗ API прокси: не работает"
         status=1
     fi
     
-    if [[ -f "$INSTALL_DIR/frontend/build/index.html" ]]; then
+    # Проверка фронтенда
+    if [[ -f "$INSTALL_DIR/frontend/build/index.html" ]] || [[ -f "$INSTALL_DIR/frontend/dist/index.html" ]]; then
         log_info "✓ Фронтенд: найден"
     else
-        log_warn "✗ Фронтенд: отсутствует"
+        log_warn "✗ Фронтенд: отсутствует (используется тестовая страница)"
     fi
     
     return $status
@@ -1015,7 +1146,7 @@ case "${1:-}" in
         if [[ "${2:-}" == "error" ]]; then
             tail -f /var/log/nginx/error.log
         else
-            tail -f /var/log/nginx/gochs-access.log 2>/dev/null || tail -f /var/log/nginx/access.log
+            tail -f /var/log/nginx/access.log
         fi
         ;;
     test)
