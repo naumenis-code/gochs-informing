@@ -13,12 +13,53 @@ if [[ -f "${SCRIPT_DIR}/utils/common.sh" ]]; then
     source "${SCRIPT_DIR}/utils/common.sh"
 fi
 
+# Если common.sh не найден - определяем функции локально
+if ! type log_info &>/dev/null; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+    
+    log_info() { echo -e "${GREEN}[INFO]${NC} $(date '+%H:%M:%S') $*"; }
+    log_warn() { echo -e "${YELLOW}[WARN]${NC} $(date '+%H:%M:%S') $*"; }
+    log_error() { echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $*"; }
+    log_step() { 
+        echo ""
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${BLUE}  $*${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    }
+    generate_password() {
+        openssl rand -base64 16 2>/dev/null | tr -d "=+/" | cut -c1-16 || echo "ChangeMe$(date +%s)"
+    }
+    ensure_dir() {
+        local dir="$1"
+        if [[ ! -d "$dir" ]]; then
+            mkdir -p "$dir"
+        fi
+    }
+fi
+
 MODULE_NAME="02-python"
 MODULE_DESCRIPTION="Python окружение и зависимости"
 
 # Версии пакетов (зафиксированы для стабильности)
 PYTHON_VERSION="3.11"
 PIP_VERSION="23.3.1"
+
+# ============================================================================
+# ИСПРАВЛЕНИЕ: Явное определение переменных
+# ============================================================================
+INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
+GOCHS_USER="${GOCHS_USER:-gochs}"
+GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
+
+# Загрузка конфигурации (если есть)
+if [[ -f "${SCRIPT_DIR}/config/config.env" ]]; then
+    source "${SCRIPT_DIR}/config/config.env"
+fi
 
 install() {
     log_step "Настройка Python окружения"
@@ -371,21 +412,21 @@ app:
 database:
   host: "localhost"
   port: 5432
-  name: "$POSTGRES_DB"
-  user: "$POSTGRES_USER"
-  password: "$POSTGRES_PASSWORD"
+  name: "${POSTGRES_DB:-gochs}"
+  user: "${POSTGRES_USER:-gochs_user}"
+  password: "${POSTGRES_PASSWORD}"
 
 redis:
   host: "localhost"
-  port: $REDIS_PORT
-  password: "$REDIS_PASSWORD"
+  port: ${REDIS_PORT:-6379}
+  password: "${REDIS_PASSWORD}"
   db: 0
 
 asterisk:
   host: "localhost"
-  ami_port: $ASTERISK_AMI_PORT
-  ami_user: "$ASTERISK_AMI_USER"
-  ami_password: "$ASTERISK_AMI_PASSWORD"
+  ami_port: ${ASTERISK_AMI_PORT:-5038}
+  ami_user: "${ASTERISK_AMI_USER:-gochs_ami}"
+  ami_password: "${ASTERISK_AMI_PASSWORD}"
   
 tts:
   model_path: "$INSTALL_DIR/models/tts"
@@ -397,7 +438,7 @@ stt:
   sample_rate: 16000
   
 logging:
-  level: "$LOG_LEVEL"
+  level: "${LOG_LEVEL:-INFO}"
   file: "$INSTALL_DIR/logs/app.log"
   max_size: "100MB"
   backup_count: 10
@@ -409,22 +450,83 @@ security:
   lockout_minutes: 15
 EOF
     
-    # Создание файла .env
+    # ============================================================
+    # ИСПРАВЛЕНИЕ 1: Создание .env с правильными переменными
+    # ============================================================
+    log_info "Создание файла .env с переменными окружения..."
+    
+    # Получаем пароли из конфигурации если они есть
+    local pg_password="${POSTGRES_PASSWORD}"
+    local redis_password="${REDIS_PASSWORD}"
+    local ami_password="${ASTERISK_AMI_PASSWORD}"
+    local ari_password="${ASTERISK_ARI_PASSWORD}"
+    
+    # Если пароли пустые - генерируем
+    [[ -z "$pg_password" ]] && pg_password=$(generate_password 16)
+    [[ -z "$redis_password" ]] && redis_password=$(generate_password 16)
+    [[ -z "$ami_password" ]] && ami_password=$(generate_password 16)
+    [[ -z "$ari_password" ]] && ari_password=$(generate_password 16)
+    
     cat > "$INSTALL_DIR/.env" << EOF
 # Environment variables for GO-CHS
 GOCHS_ENV=production
 GOCHS_CONFIG=$INSTALL_DIR/config/config.yaml
 PYTHONPATH=$INSTALL_DIR/app
-PATH=$INSTALL_DIR/venv/bin:$PATH
+PATH=$INSTALL_DIR/venv/bin:\$PATH
+
+# База данных
+POSTGRES_DB=${POSTGRES_DB:-gochs}
+POSTGRES_USER=${POSTGRES_USER:-gochs_user}
+POSTGRES_PASSWORD=$pg_password
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+
+# Redis
+REDIS_PASSWORD=$redis_password
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# Asterisk
+ASTERISK_AMI_USER=${ASTERISK_AMI_USER:-gochs_ami}
+ASTERISK_AMI_PASSWORD=$ami_password
+ASTERISK_ARI_USER=${ASTERISK_ARI_USER:-gochs}
+ASTERISK_ARI_PASSWORD=$ari_password
+
+# Безопасность
+SECRET_KEY=$(generate_password 32)
+JWT_SECRET_KEY=$(generate_password 32)
+
+# Отладка
+DEBUG=false
 EOF
-    
-    # Установка прав
-    chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/venv"
-    chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/models"
-    chown "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/config"
-    chown "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/.env"
-    chmod 600 "$INSTALL_DIR/config/config.yaml"
+
+    # ============================================================
+    # ИСПРАВЛЕНИЕ 2: Правильные права на .env
+    # ============================================================
+    log_info "Установка прав на .env файл..."
+    chown "$GOCHS_USER":"$GOCHS_GROUP" "$INSTALL_DIR/.env" 2>/dev/null || {
+        # Если пользователь ещё не создан, пробуем по имени
+        chown gochs:gochs "$INSTALL_DIR/.env" 2>/dev/null || true
+    }
     chmod 600 "$INSTALL_DIR/.env"
+    log_info "✓ Права на .env установлены (600, владелец: $GOCHS_USER)"
+    
+    # Установка прав на другие файлы
+    chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/venv" 2>/dev/null || true
+    chown -R "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/models" 2>/dev/null || true
+    chown "$GOCHS_USER":"$GOCHS_USER" "$INSTALL_DIR/config" 2>/dev/null || true
+    chmod 600 "$INSTALL_DIR/config/config.yaml"
+    chmod 755 "$INSTALL_DIR/config"
+    
+    # ============================================================
+    # ИСПРАВЛЕНИЕ 3: Совместимость TTS
+    # ============================================================
+    log_info "Исправление совместимости Coqui TTS..."
+    if pip install transformers==4.33.0 --force-reinstall 2>/dev/null; then
+        log_info "✓ transformers исправлен до версии 4.33.0"
+    else
+        log_warn "⚠ Не удалось исправить transformers, TTS будет использовать espeak"
+    fi
     
     # Проверка установки
     log_info "Проверка установленных пакетов..."
@@ -537,6 +639,19 @@ check_status() {
         log_info "Конфигурация: создана"
     else
         log_warn "Конфигурация: отсутствует"
+        status=1
+    fi
+    
+    # Проверка .env
+    if [[ -f "$INSTALL_DIR/.env" ]]; then
+        local perms=$(stat -c %a "$INSTALL_DIR/.env" 2>/dev/null)
+        local owner=$(stat -c %U "$INSTALL_DIR/.env" 2>/dev/null)
+        log_info ".env файл: существует (права: $perms, владелец: $owner)"
+        if [[ "$perms" != "600" ]]; then
+            log_warn "  ⚠ Небезопасные права на .env: $perms (должны быть 600)"
+        fi
+    else
+        log_warn ".env файл: отсутствует"
         status=1
     fi
     
