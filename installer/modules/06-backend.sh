@@ -12,6 +12,31 @@ source "${SCRIPT_DIR}/utils/common.sh" 2>/dev/null || {
     mark_module_installed() { echo "$1:$(date +%s)" >> "${INSTALL_DIR:-/opt/gochs-informing}/.modules_state"; }
 }
 
+
+
+# Исправление прав на .env перед запуском
+if [ -f "$INSTALL_DIR/.env" ]; then
+    chown gochs:gochs "$INSTALL_DIR/.env" 2>/dev/null || true
+    chmod 600 "$INSTALL_DIR/.env" 2>/dev/null || true
+    log_info "✓ Права на .env исправлены"
+else
+    log_warn "⚠ .env файл не найден, создаю..."
+    # Создаём .env из config.env
+    source "${SCRIPT_DIR}/config/config.env" 2>/dev/null || true
+    cat > "$INSTALL_DIR/.env" << EOF
+GOCHS_ENV=production
+DEBUG=false
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+REDIS_PASSWORD=${REDIS_PASSWORD}
+ASTERISK_AMI_PASSWORD=${ASTERISK_AMI_PASSWORD}
+ASTERISK_ARI_PASSWORD=${ASTERISK_ARI_PASSWORD}
+SECRET_KEY=$(openssl rand -base64 32 2>/dev/null | tr -d "=+/" | cut -c1-32)
+JWT_SECRET_KEY=$(openssl rand -base64 32 2>/dev/null | tr -d "=+/" | cut -c1-32)
+EOF
+    chown gochs:gochs "$INSTALL_DIR/.env"
+    chmod 600 "$INSTALL_DIR/.env"
+fi
+
 MODULE_NAME="06-backend"
 INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
 source "${SCRIPT_DIR}/config/config.env" 2>/dev/null || true
