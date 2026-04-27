@@ -2,11 +2,13 @@
 ################################################################################
 # Модуль: 07-frontend.sh — Установка React фронтенда
 # Копирует готовые файлы из installer/frontend/ + создает недостающие
+# ИСПРАВЛЕННАЯ ВЕРСИЯ: фикс сборки, api.ts, обработка ошибок
 ################################################################################
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${SCRIPT_DIR}/utils/common.sh" 2>/dev/null || {
     log_info() { echo -e "\033[0;32m[INFO]\033[0m $(date '+%H:%M:%S') $*"; }
     log_error() { echo -e "\033[0;31m[ERROR]\033[0m $*"; }
+    log_warn() { echo -e "\033[1;33m[WARN]\033[0m $*"; }
     log_step() { echo -e "\n\033[0;34m═══ $* ═══\033[0m"; }
     ensure_dir() { mkdir -p "$1"; }
     mark_module_installed() { echo "$1:$(date +%s)" >> "${INSTALL_DIR:-/opt/gochs-informing}/.modules_state"; }
@@ -16,11 +18,15 @@ MODULE_NAME="07-frontend"
 INSTALL_DIR="${INSTALL_DIR:-/opt/gochs-informing}"
 INSTALLER_FRONTEND="${SCRIPT_DIR}/frontend"
 TARGET_FRONTEND="$INSTALL_DIR/frontend"
+GOCHS_USER="${GOCHS_USER:-gochs}"
+GOCHS_GROUP="${GOCHS_GROUP:-gochs}"
 
 install() {
     log_step "Установка React фронтенда"
     
+    # =========================================================================
     # Установка Node.js если нет
+    # =========================================================================
     if ! command -v node &>/dev/null; then
         log_info "Установка Node.js 20..."
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - 2>/dev/null
@@ -28,7 +34,9 @@ install() {
     fi
     log_info "Node.js: $(node --version)"
     
+    # =========================================================================
     # Создание директорий
+    # =========================================================================
     ensure_dir "$TARGET_FRONTEND"
     ensure_dir "$TARGET_FRONTEND/src"
     ensure_dir "$TARGET_FRONTEND/src/pages"
@@ -40,13 +48,20 @@ install() {
     ensure_dir "$TARGET_FRONTEND/src/context"
     ensure_dir "$TARGET_FRONTEND/src/styles"
     
+    # =========================================================================
     # Копирование из installer если есть
-    if [ -d "$INSTALLER_FRONTEND" ]; then
+    # =========================================================================
+    if [ -d "$INSTALLER_FRONTEND" ] && [ -n "$(ls -A "$INSTALLER_FRONTEND" 2>/dev/null)" ]; then
         log_info "Копирование готовых файлов из installer/frontend/..."
         cp -r "$INSTALLER_FRONTEND"/* "$TARGET_FRONTEND/" 2>/dev/null
+        log_info "  ✓ Файлы скопированы"
+    else
+        log_warn "installer/frontend/ пуст или отсутствует, создаю базовый фронтенд"
     fi
     
+    # =========================================================================
     # СОЗДАНИЕ ОБЯЗАТЕЛЬНЫХ ФАЙЛОВ если их нет
+    # =========================================================================
     log_info "Проверка и создание обязательных файлов..."
     
     F="$TARGET_FRONTEND"
@@ -80,7 +95,7 @@ install() {
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.0.8",
+    "vite": "5.0.8",
     "typescript": "^5.3.3",
     "sass": "^1.69.5",
     "terser": "^5.37.0"
@@ -88,6 +103,14 @@ install() {
 }
 PKGJSON
         log_info "  ✓ package.json"
+    else
+        # ИСПРАВЛЕНИЕ: фиксируем версию Vite для стабильности
+        log_info "  Проверка версии Vite в package.json..."
+        if grep -q '"vite"' "$F/package.json" 2>/dev/null; then
+            # Заменяем версию Vite на стабильную
+            sed -i 's/"vite": "[^"]*"/"vite": "5.0.8"/' "$F/package.json"
+            log_info "  ✓ Версия Vite зафиксирована на 5.0.8"
+        fi
     fi
     
     # vite.config.ts
@@ -108,8 +131,23 @@ export default defineConfig({
   },
   build: {
     outDir: 'build',
-    sourcemap: false
-  }
+    sourcemap: false,
+    // ИСПРАВЛЕНИЕ: оптимизация сборки
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          antd: ['antd', '@ant-design/icons'],
+        },
+      },
+    },
+    // ИСПРАВЛЕНИЕ: увеличиваем лимит памяти для сборки
+    chunkSizeWarningLimit: 1000,
+  },
+  // ИСПРАВЛЕНИЕ: оптимизация зависимостей
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-router-dom', 'axios', 'antd'],
+  },
 });
 VITECFG
         log_info "  ✓ vite.config.ts"
@@ -157,6 +195,53 @@ TSCFG
 </html>
 INDEXHTML
         log_info "  ✓ index.html"
+    fi
+    
+    # =========================================================================
+    # ИСПРАВЛЕНИЕ: Создание services/api.ts (базовый axios инстанс)
+    # =========================================================================
+    if [ ! -f "$F/src/services/api.ts" ]; then
+        log_info "Создание базового API клиента..."
+        cat > "$F/src/services/api.ts" << 'APITS'
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: '/api/v1',
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Интерцептор для добавления токена
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Интерцептор для обработки ошибок
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default api;
+APITS
+        log_info "  ✓ services/api.ts"
     fi
     
     # src/main.tsx
@@ -422,26 +507,59 @@ APPTSX
         log_info "  ✓ App.tsx"
     fi
     
-    chown -R gochs:gochs "$TARGET_FRONTEND/src" 2>/dev/null || true
+    # =========================================================================
+    # Установка прав
+    # =========================================================================
+    chown -R "$GOCHS_USER:$GOCHS_GROUP" "$TARGET_FRONTEND/src" 2>/dev/null || true
     
+    # =========================================================================
     # СБОРКА
+    # =========================================================================
     log_info "Сборка React приложения..."
     cd "$TARGET_FRONTEND"
-    npm install --legacy-peer-deps 2>&1 | tail -3
-    npm run build 2>&1 | tail -5
     
-    if [ -d "build" ]; then
-        # Создаем index.html в build если vite не создал
-        if [ ! -f "build/index.html" ]; then
-            JS_FILE=$(ls build/assets/index-*.js 2>/dev/null | head -1 | xargs basename)
-            cat > "build/index.html" << HTML
+    # Очистка перед сборкой
+    log_info "Очистка кэша..."
+    rm -rf node_modules/.vite 2>/dev/null || true
+    rm -rf build 2>/dev/null || true
+    rm -rf dist 2>/dev/null || true
+    
+    # Установка зависимостей
+    log_info "Установка зависимостей npm..."
+    npm install --legacy-peer-deps 2>&1 | tail -5
+    
+    # Сборка
+    log_info "Запуск сборки..."
+    if npm run build 2>&1 | tail -20; then
+        log_info "✓ Сборка завершена успешно"
+        
+        # Поиск собранных файлов
+        if [ -d "build" ]; then
+            BUILD_DIR="build"
+        elif [ -d "dist" ]; then
+            BUILD_DIR="dist"
+        else
+            log_warn "⚠ Директория сборки не найдена"
+            BUILD_DIR=""
+        fi
+        
+        if [ -n "$BUILD_DIR" ] && [ -f "$BUILD_DIR/index.html" ]; then
+            log_info "✓ Фронтенд собран: $(du -sh $BUILD_DIR | cut -f1)"
+        elif [ -n "$BUILD_DIR" ]; then
+            # ИСПРАВЛЕНИЕ: Создаем index.html если vite не создал
+            log_warn "⚠ index.html не найден в $BUILD_DIR, создаю..."
+            JS_FILE=$(ls $BUILD_DIR/assets/index-*.js 2>/dev/null | head -1 | xargs basename)
+            CSS_FILE=$(ls $BUILD_DIR/assets/index-*.css 2>/dev/null | head -1 | xargs basename)
+            
+            cat > "$BUILD_DIR/index.html" << HTML
 <!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ГО-ЧС Информирование</title>
-  <script type="module" crossorigin src="/assets/$JS_FILE"></script>
+  ${CSS_FILE:+"<link rel=\"stylesheet\" crossorigin href=\"/assets/$CSS_FILE\">"}
+  ${JS_FILE:+"<script type=\"module\" crossorigin src=\"/assets/$JS_FILE\"></script>"}
 </head>
 <body>
   <div id="root"></div>
@@ -449,18 +567,36 @@ APPTSX
 </html>
 HTML
         fi
-        chown -R www-data:www-data build
-        log_info "✓ Фронтенд собран: $(du -sh build | cut -f1)"
+        
+        # Права для nginx
+        if [ -n "$BUILD_DIR" ]; then
+            chown -R www-data:www-data "$BUILD_DIR"
+            log_info "✓ Права на $BUILD_DIR установлены"
+        fi
     else
         log_error "✗ Сборка не удалась"
+        log_info "  Проверьте лог выше. Возможные причины:"
+        log_info "  1. Несовместимость версий пакетов"
+        log_info "  2. Не хватает памяти (нужно минимум 2GB RAM)"
+        log_info "  3. Ошибка в TypeScript/CSS"
+        
+        # Пробуем с флагом --force
+        log_info "  Пробую собрать с --force..."
+        npx vite build --force 2>&1 | tail -10 || {
+            log_error "  Сборка всё равно не удалась. Фронтенд будет недоступен."
+        }
     fi
+    
+    cd "$SCRIPT_DIR"
     
     mark_module_installed "$MODULE_NAME"
     log_info "Модуль $MODULE_NAME установлен"
 }
 
 uninstall() {
-    rm -rf "$TARGET_FRONTEND"
+    rm -rf "$TARGET_FRONTEND/node_modules"
+    rm -rf "$TARGET_FRONTEND/build"
+    rm -rf "$TARGET_FRONTEND/dist"
     log_info "Модуль $MODULE_NAME удален"
 }
 
