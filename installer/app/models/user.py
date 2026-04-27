@@ -20,11 +20,3 @@ class User(Base):
     login_count = Column(Integer, default=0)
     last_login = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
-EOF
-
-# api/v1/endpoints/reports.py
-cat > app/api/v1/endpoints/reports.py << 'EOF'
-from fastapi import APIRouter
-router = APIRouter()
-@router.get("/summary")
-async def summary(): return {"campaigns": {"total": 0}, "calls": {"total": 0}}
