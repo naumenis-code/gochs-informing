@@ -421,95 +421,101 @@ create_self_signed_cert() {
 }
 
 enable_https_config() {
-    log_info "Создание HTTPS конфигурации..."
+    log_info "Создание HTTPS конфигурации с редиректом..."
     
-    # ИСПРАВЛЕНИЕ: Проверка существования фронтенда
-    local frontend_root="$INSTALL_DIR/frontend/build"
-    if [[ ! -d "$frontend_root" ]] || [[ ! -f "$frontend_root/index.html" ]]; then
-        log_warn "Фронтенд не найден в $frontend_root, будет использоваться тестовая страница"
-        frontend_root="$INSTALL_DIR/frontend/build"
-        ensure_dir "$frontend_root"
-    fi
-    
-    cat > "/etc/nginx/conf.d/gochs.conf" << EOF
+    cat > "/etc/nginx/conf.d/gochs.conf" << 'EOF'
 # HTTP -> HTTPS редирект
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-    return 301 https://\$host\$request_uri;
+    return 301 https://$host$request_uri;
 }
 
 # HTTPS сервер
 server {
-    listen 443 ssl default_server;
-    listen [::]:443 ssl default_server;
+    listen 443 ssl http2 default_server;
+    listen [::]:443 ssl http2 default_server;
     server_name _;
     
     ssl_certificate /etc/nginx/ssl/gochs.crt;
     ssl_certificate_key /etc/nginx/ssl/gochs.key;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
     
-    root $frontend_root;
+    # Корень для статики фронтенда
+    root /opt/gochs-informing/frontend/build;
     index index.html;
+    
+    # Максимальный размер загрузки
+    client_max_body_size 100M;
     
     # API прокси
     location /api {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
         proxy_read_timeout 300s;
-        proxy_connect_timeout 75s;
     }
     
+    # Health check
     location /health {
         proxy_pass http://127.0.0.1:8000/health;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
     
+    # Swagger документация
     location /docs {
         proxy_pass http://127.0.0.1:8000/docs;
-        proxy_set_header Host \$host;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
     
     location /openapi.json {
         proxy_pass http://127.0.0.1:8000/openapi.json;
-        proxy_set_header Host \$host;
+        proxy_set_header Host $host;
     }
     
     # WebSocket
     location /ws {
         proxy_pass http://127.0.0.1:8000/ws;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_read_timeout 86400;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 86400s;
     }
     
-    # Статические файлы
+    # SPA - все остальное на index.html
     location / {
-        try_files \$uri \$uri/ /index.html;
+        try_files $uri $uri/ /index.html;
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
     }
     
-    # Кэширование статики
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+    # Статические ассеты с долгим кешем
+    location /assets {
         expires 30d;
-        add_header Cache-Control "public, immutable";
+        add_header Cache-Control "public, max-age=2592000, immutable";
     }
 }
 EOF
 
+    # Замена пути установки
+    sed -i "s|/opt/gochs-informing|$INSTALL_DIR|g" /etc/nginx/conf.d/gochs.conf
+    
     if /usr/sbin/nginx -t 2>&1; then
-        log_info "HTTPS конфигурация создана и проверена"
+        log_info "✓ HTTPS конфигурация создана и проверена"
     else
-        log_error "Ошибка в HTTPS конфигурации"
+        log_error "✗ Ошибка в HTTPS конфигурации"
+        /usr/sbin/nginx -t
         return 1
     fi
 }
